@@ -1,6 +1,6 @@
 {
 	"name": "pelicanode",
-	"version": "1.0.0",
+	"version": "1.0.0-beta33",
 	"description": "Fully-typed Node.js client for the Pelican Panel API (Application + Client APIs)",
 	"type": "module",
 	"main": "dist/index.js",
