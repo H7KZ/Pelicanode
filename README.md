@@ -7,6 +7,8 @@
 
 A fully-typed Node.js client for the [Pelican Panel](https://pelican.dev) API, covering both the **Application API** (admin) and the **Client API** (user).
 
+**[Full documentation →](./docs/README.md)**
+
 ## Features
 
 - **100% API coverage** — Application API (users, nodes, allocations, servers, eggs, database hosts, mounts, roles, plugins) and Client API (account, files, databases, schedules, network, subusers, backups, startup, settings)
@@ -418,30 +420,38 @@ try {
 
 ## API Reference
 
-| Namespace | Methods |
-|---|---|
-| `application.users` | `list`, `get`, `getByExternalId`, `create`, `update`, `delete`, `assignRoles`, `removeRoles` |
-| `application.nodes` | `list`, `get`, `getDeployable`, `getConfiguration`, `create`, `update`, `delete` |
-| `application.allocations` | `list`, `create`, `delete` |
-| `application.servers` | `list`, `get`, `getByExternalId`, `create`, `updateDetails`, `updateBuild`, `updateStartup`, `suspend`, `unsuspend`, `reinstall`, `startTransfer`, `cancelTransfer`, `delete`, `forceDelete` |
-| `application.serverDatabases` | `list`, `get`, `create`, `resetPassword`, `delete` |
-| `application.eggs` | `list`, `get`, `delete`, `deleteByUuid`, `export`, `import` |
-| `application.databaseHosts` | `list`, `get`, `create`, `update`, `delete` |
-| `application.mounts` | `list`, `get`, `create`, `update`, `delete`, `listEggs`, `addEggs`, `removeEgg`, `listNodes`, `addNodes`, `removeNode`, `listServers`, `addServers`, `removeServer` |
-| `application.roles` | `list`, `get`, `create`, `update`, `delete` |
-| `application.plugins` | `list`, `get`, `install`, `update`, `uninstall`, `enable`, `disable`, `importFromUrl`, `importFromFile` |
-| `client.listServers` | Paginated server list |
-| `client.listPermissions` | All subuser permission keys |
-| `client.account` | `get`, `updateUsername`, `updateEmail`, `updatePassword`, `listActivity`, `apiKeys.*`, `sshKeys.*` |
-| `client.server(uuid).` | `get`, `getWebsocketToken`, `getResources`, `listActivity`, `sendCommand`, `sendPower` |
-| `client.server(uuid).files` | `list`, `getContents`, `getDownloadUrl`, `getUploadUrl`, `write`, `createFolder`, `rename`, `copy`, `delete`, `compress`, `decompress`, `chmod`, `pull` |
-| `client.server(uuid).databases` | `list`, `create`, `rotatePassword`, `delete` |
-| `client.server(uuid).schedules` | `list`, `get`, `create`, `update`, `delete`, `execute`, `createTask`, `updateTask`, `deleteTask` |
-| `client.server(uuid).network` | `list`, `create`, `update`, `setPrimary`, `delete` |
-| `client.server(uuid).subusers` | `list`, `get`, `create`, `update`, `delete` |
-| `client.server(uuid).backups` | `list`, `get`, `create`, `delete`, `getDownloadUrl`, `rename`, `toggleLock`, `restore` |
-| `client.server(uuid).startup` | `list`, `updateVariable` |
-| `client.server(uuid).settings` | `rename`, `updateDescription`, `reinstall`, `setDockerImage` |
+For full method signatures, parameter details, return types, and required permissions see the **[documentation](./docs/README.md)**.
+
+### Application API (admin key)
+
+| Namespace | Docs | Methods |
+|---|---|---|
+| `application.users` | [→](./docs/application/users.md) | `list`, `get`, `getByExternalId`, `create`, `update`, `delete`, `assignRoles`, `removeRoles` |
+| `application.nodes` | [→](./docs/application/nodes.md) | `list`, `get`, `getDeployable`, `getConfiguration`, `create`, `update`, `delete` |
+| `application.allocations` | [→](./docs/application/allocations.md) | `list`, `create`, `delete` |
+| `application.servers` | [→](./docs/application/servers.md) | `list`, `get`, `getByExternalId`, `create`, `updateDetails`, `updateBuild`, `updateStartup`, `suspend`, `unsuspend`, `reinstall`, `startTransfer`, `cancelTransfer`, `delete`, `forceDelete` |
+| `application.serverDatabases` | [→](./docs/application/server-databases.md) | `list`, `get`, `create`, `resetPassword`, `delete` |
+| `application.eggs` | [→](./docs/application/eggs.md) | `list`, `get`, `getByUuid`, `delete`, `deleteByUuid`, `export`, `import` |
+| `application.databaseHosts` | [→](./docs/application/database-hosts.md) | `list`, `get`, `create`, `update`, `delete` |
+| `application.mounts` | [→](./docs/application/mounts.md) | `list`, `get`, `create`, `update`, `delete`, `listEggs`, `addEggs`, `removeEgg`, `listNodes`, `addNodes`, `removeNode`, `listServers`, `addServers`, `removeServer` |
+| `application.roles` | [→](./docs/application/roles.md) | `list`, `get`, `create`, `update`, `delete` |
+| `application.plugins` | [→](./docs/application/plugins.md) | `list`, `get`, `install`, `update`, `uninstall`, `enable`, `disable`, `importFromUrl`, `importFromFile` |
+
+### Client API (account key)
+
+| Namespace | Docs | Methods |
+|---|---|---|
+| `client.listServers` / `client.listPermissions` | [→](./docs/client/server.md) | Paginated server list, permission keys |
+| `client.account` | [→](./docs/client/account.md) | `get`, `updateUsername`, `updateEmail`, `updatePassword`, `listActivity`, `apiKeys.*`, `sshKeys.*` |
+| `client.server(uuid)` | [→](./docs/client/server.md) | `get`, `getWebsocketToken`, `getResources`, `listActivity`, `sendCommand`, `sendPower` |
+| `.files` | [→](./docs/client/files.md) | `list`, `getContents`, `getDownloadUrl`, `getUploadUrl`, `write`, `createFolder`, `rename`, `copy`, `delete`, `compress`, `decompress`, `chmod`, `pull` |
+| `.databases` | [→](./docs/client/databases.md) | `list`, `create`, `rotatePassword`, `delete` |
+| `.schedules` | [→](./docs/client/schedules.md) | `list`, `get`, `create`, `update`, `delete`, `execute`, `createTask`, `updateTask`, `deleteTask` |
+| `.network` | [→](./docs/client/network.md) | `list`, `create`, `update`, `setPrimary`, `delete` |
+| `.subusers` | [→](./docs/client/subusers.md) | `list`, `get`, `create`, `update`, `delete` |
+| `.backups` | [→](./docs/client/backups.md) | `list`, `get`, `create`, `delete`, `getDownloadUrl`, `rename`, `toggleLock`, `restore` |
+| `.startup` | [→](./docs/client/startup.md) | `list`, `updateVariable` |
+| `.settings` | [→](./docs/client/settings.md) | `rename`, `updateDescription`, `reinstall`, `setDockerImage` |
 
 ---
 
