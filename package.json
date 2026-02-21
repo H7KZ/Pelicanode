@@ -36,7 +36,7 @@
 		"typescript"
 	],
 	"author": "H7KZ",
-	"license": "ISC",
+	"license": "AGPL-3.0-only",
 	"bugs": {
 		"url": "https://github.com/H7KZ/Pelicanode/issues"
 	},

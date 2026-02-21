@@ -1,0 +1,150 @@
+# Taken from Pelican.ts (https://github.com/m41denx/Pelican.ts)
+# https://github.com/m41denx/Pelican.ts/blob/master/.github/workflows/track-api-changes.yml
+
+name: Track Upstream API Changes
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone upstream repo
+        run: |
+          git clone https://github.com/pelican-dev/panel.git upstream
+          cd upstream
+          git fetch origin main
+
+      - name: Get last checked commit from issues
+        id: get_last_commit
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'api-changes',
+              state: 'all',
+              sort: 'created',
+              direction: 'desc',
+              per_page: 1
+            });
+
+            let lastCommit = '';
+            if (issues.data.length > 0) {
+              const body = issues.data[0].body;
+              const matches = body.match(/pelican-dev\/panel\/commit\/([a-f0-9]{40})/g);
+              if (matches && matches.length > 0) {
+                lastCommit = matches[matches.length - 1].split('/').pop();
+              }
+            }
+
+            if (!lastCommit) {
+              const sevenDaysAgo = new Date();
+              sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+              lastCommit = sevenDaysAgo.toISOString();
+            }
+
+            core.setOutput('last_commit', lastCommit);
+            return lastCommit;
+
+      - name: Check for new commits in upstream
+        id: check
+        env:
+          LAST_COMMIT: ${{ steps.get_last_commit.outputs.last_commit }}
+        run: |
+          cd upstream
+
+          if [[ "$LAST_COMMIT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
+            NEW_COMMITS=$(git log --since="$LAST_COMMIT" --format="%H" --reverse)
+          else
+            NEW_COMMITS=$(git log ${LAST_COMMIT}..origin/main --format="%H" --reverse)
+          fi
+
+          if [ -z "$NEW_COMMITS" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          WATCHED_FOLDERS="routes/ app/Http/"
+          RELEVANT_COMMITS=""
+
+          for commit in $NEW_COMMITS; do
+            CHANGED=$(git diff-tree --no-commit-id --name-only -r $commit | grep -E "^($(echo $WATCHED_FOLDERS | tr ' ' '|'))" || true)
+            if [ -n "$CHANGED" ]; then
+              RELEVANT_COMMITS="$RELEVANT_COMMITS $commit"
+            fi
+          done
+
+          if [ -z "$RELEVANT_COMMITS" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "$RELEVANT_COMMITS" > /tmp/relevant_commits.txt
+          fi
+
+      - name: Generate issue body
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          cd upstream
+
+          COMMITS=$(cat /tmp/relevant_commits.txt)
+          WATCHED_FOLDERS="routes/ app/Http/"
+
+          {
+            echo "## API Changes Detected"
+            echo ""
+            echo "The following commits modified API-related files in the upstream repository:"
+            echo ""
+          } > /tmp/issue_body.md
+
+          for commit in $COMMITS; do
+            COMMIT_MSG=$(git log -1 --format="%s" $commit)
+            COMMIT_AUTHOR=$(git log -1 --format="%an" $commit)
+            COMMIT_DATE=$(git log -1 --format="%ci" $commit)
+            COMMIT_URL="https://github.com/pelican-dev/panel/commit/$commit"
+
+            {
+              echo "### \`${commit:0:7}\` - $COMMIT_MSG"
+              echo "**Author:** $COMMIT_AUTHOR  "
+              echo "**Date:** $COMMIT_DATE  "
+              echo "**Commit:** $COMMIT_URL"
+              echo ""
+              echo "**Changed files:**"
+              git diff-tree --no-commit-id --name-only -r $commit | grep -E "^($(echo $WATCHED_FOLDERS | tr ' ' '|'))" | while read file; do
+                echo "- \`$file\`"
+              done
+              echo ""
+            } >> /tmp/issue_body.md
+          done
+
+          {
+            echo "---"
+            echo ""
+            echo "Please review these changes and update the API client accordingly."
+          } >> /tmp/issue_body.md
+
+      - name: Create GitHub issue
+        if: steps.check.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const issueBody = fs.readFileSync('/tmp/issue_body.md', 'utf8');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `API Changes Detected - ${new Date().toISOString().split('T')[0]}`,
+              body: issueBody,
+              labels: ['api-changes']
+            });
