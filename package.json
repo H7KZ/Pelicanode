@@ -1,24 +1,47 @@
 {
 	"name": "pelicanode",
-	"version": "0.0.1",
+	"version": "1.0.0",
+	"description": "Fully-typed Node.js client for the Pelican Panel API (Application + Client APIs)",
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
 	"scripts": {
-		"build": "tsc"
+		"build": "tsc",
+		"clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/H7KZ/Pelicanode.git"
 	},
-	"keywords": [],
-	"author": "",
+	"keywords": [
+		"pelican",
+		"pelican-panel",
+		"game-server",
+		"api",
+		"client",
+		"typescript"
+	],
+	"author": "H7KZ",
 	"license": "ISC",
 	"bugs": {
 		"url": "https://github.com/H7KZ/Pelicanode/issues"
 	},
 	"homepage": "https://github.com/H7KZ/Pelicanode",
-	"description": "",
+	"engines": {
+		"node": ">=18.0.0"
+	},
 	"devDependencies": {
 		"@types/node": "^24.2.1",
 		"typescript": "^5.9.2"

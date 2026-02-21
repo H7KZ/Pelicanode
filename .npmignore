@@ -1,0 +1,7 @@
+src/
+.claude/
+.github/
+.idea/
+*.map
+tsconfig.json
+.gitignore

@@ -1,0 +1,3439 @@
+openapi: 3.0.3
+info:
+  title: Pelican Panel Application API
+  description: |
+    The Application API provides administrative access to manage all Pelican Panel resources.
+
+    ## Authentication
+    All endpoints require a Bearer API key associated with an **administrator** account.
+    ```
+    Authorization: Bearer <your-api-key>
+    ```
+
+    ## Response Format
+    All responses use the Fractal transformer format:
+
+    **Single resource:**
+    ```json
+    { "object": "<type>", "attributes": { ... } }
+    ```
+    **Collection:**
+    ```json
+    { "object": "list", "data": [...], "meta": { "pagination": { ... } } }
+    ```
+    **Created resource** (201):
+    ```json
+    { "object": "<type>", "attributes": { ... }, "meta": { "resource": "https://..." } }
+    ```
+
+    ## Includes
+    Many list/view endpoints support eager-loading related resources via the `include` query parameter (comma-separated):
+    ```
+    GET /api/application/users?include=servers,roles
+    ```
+
+    ## Filtering & Sorting
+    List endpoints support:
+    - Filtering: `filter[field]=value`
+    - Sorting: `sort=field` (prefix with `-` for descending, e.g. `sort=-id`)
+
+    ## Pagination
+    - `page` — page number (default: 1)
+    - `per_page` — results per page (varies by endpoint; default shown per endpoint)
+  version: 1.0.0
+  contact:
+    name: Pelican Panel
+    url: https://pelican.dev
+
+servers:
+  - url: /api/application
+    description: Application API
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Users
+    description: Manage panel users
+  - name: Nodes
+    description: Manage daemon nodes
+  - name: Allocations
+    description: Manage node port allocations
+  - name: Servers
+    description: Manage game servers
+  - name: Server Databases
+    description: Manage databases attached to servers
+  - name: Eggs
+    description: Manage server configuration templates
+  - name: Database Hosts
+    description: Manage database host connections
+  - name: Mounts
+    description: Manage filesystem bind mounts
+  - name: Roles
+    description: Manage administrative roles
+  - name: Plugins
+    description: Manage panel plugins
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # USERS
+  # ---------------------------------------------------------------------------
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List all users
+      description: Returns a paginated list of users. Supports filtering on `email`, `uuid`, `username`, `external_id` and sorting on `id`, `uuid`.
+      operationId: listUsers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/Sort'
+        - { name: "filter[email]", in: query, schema: { type: string } }
+        - { name: "filter[uuid]", in: query, schema: { type: string } }
+        - { name: "filter[username]", in: query, schema: { type: string } }
+        - { name: "filter[external_id]", in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated list of users
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Users]
+      summary: Create a user
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserRequest' }
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [Users]
+      summary: Get a user
+      operationId: getUser
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [Users]
+      summary: Update a user
+      operationId: updateUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+    delete:
+      tags: [Users]
+      summary: Delete a user
+      description: Deletes a user. Root admin accounts cannot be deleted.
+      operationId: deleteUser
+      responses:
+        '204': { description: User deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/external/{externalId}:
+    get:
+      tags: [Users]
+      summary: Get user by external ID
+      description: Look up a user using a third-party system's external identifier.
+      operationId: getUserByExternalId
+      parameters:
+        - name: externalId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{userId}/roles/assign:
+    patch:
+      tags: [Users]
+      summary: Assign roles to a user
+      description: Assigns one or more roles to a user. Cannot assign roles to root admin accounts.
+      operationId: assignUserRoles
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignRolesRequest' }
+      responses:
+        '200':
+          description: Updated user with new roles
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{userId}/roles/remove:
+    patch:
+      tags: [Users]
+      summary: Remove roles from a user
+      operationId: removeUserRoles
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignRolesRequest' }
+      responses:
+        '200':
+          description: Updated user after role removal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # NODES
+  # ---------------------------------------------------------------------------
+
+  /nodes:
+    get:
+      tags: [Nodes]
+      summary: List all nodes
+      description: Returns a paginated list of nodes. Supports filtering on `uuid`, `name`, `fqdn`, `daemon_token_id` and sorting on `id`, `uuid`, `memory`, `disk`, `cpu`.
+      operationId: listNodes
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/Sort'
+        - { name: "filter[uuid]", in: query, schema: { type: string } }
+        - { name: "filter[name]", in: query, schema: { type: string } }
+        - { name: "filter[fqdn]", in: query, schema: { type: string } }
+        - { name: "filter[daemon_token_id]", in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated list of nodes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+    post:
+      tags: [Nodes]
+      summary: Create a node
+      operationId: createNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNodeRequest' }
+      responses:
+        '201':
+          description: Node created successfully
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /nodes/deployable:
+    get:
+      tags: [Nodes]
+      summary: Get deployable nodes
+      description: Returns nodes that satisfy the given deployment resource requirements.
+      operationId: getDeployableNodes
+      parameters:
+        - $ref: '#/components/parameters/Include'
+        - name: memory
+          in: query
+          required: true
+          description: Required memory in MB
+          schema: { type: integer, minimum: 0 }
+        - name: disk
+          in: query
+          required: true
+          description: Required disk in MB
+          schema: { type: integer, minimum: 0 }
+        - name: cpu
+          in: query
+          description: Required CPU percentage
+          schema: { type: integer, minimum: 0 }
+        - name: "tags[]"
+          in: query
+          description: Node tags to filter by
+          schema: { type: array, items: { type: string } }
+        - name: "location_ids[]"
+          in: query
+          deprecated: true
+          description: Deprecated. Use `tags[]` instead.
+          schema: { type: array, items: { type: integer } }
+      responses:
+        '200':
+          description: List of deployable nodes matching the criteria
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeCollection' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /nodes/{nodeId}:
+    parameters:
+      - $ref: '#/components/parameters/NodeId'
+    get:
+      tags: [Nodes]
+      summary: Get a node
+      operationId: getNode
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Node details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [Nodes]
+      summary: Update a node
+      operationId: updateNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNodeRequest' }
+      responses:
+        '200':
+          description: Updated node
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+    delete:
+      tags: [Nodes]
+      summary: Delete a node
+      description: Deletes a node. The node must have no servers assigned to it.
+      operationId: deleteNode
+      responses:
+        '204': { description: Node deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /nodes/{nodeId}/configuration:
+    get:
+      tags: [Nodes]
+      summary: Get node daemon configuration
+      description: Returns the Wings daemon configuration object. This is sensitive data used to bootstrap a Wings instance.
+      operationId: getNodeConfiguration
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Wings daemon configuration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeConfiguration' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # ALLOCATIONS
+  # ---------------------------------------------------------------------------
+
+  /nodes/{nodeId}/allocations:
+    parameters:
+      - $ref: '#/components/parameters/NodeId'
+    get:
+      tags: [Allocations]
+      summary: List allocations for a node
+      description: Supports filtering on `ip`, `port`, `ip_alias`, `server_id`.
+      operationId: listAllocations
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - { name: "filter[ip]", in: query, schema: { type: string } }
+        - { name: "filter[port]", in: query, schema: { type: integer } }
+        - { name: "filter[ip_alias]", in: query, schema: { type: string } }
+        - { name: "filter[server_id]", in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Paginated list of allocations
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AllocationCollection' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    post:
+      tags: [Allocations]
+      summary: Create allocations
+      description: Creates one or more port allocations on a node. Supports individual ports and ranges.
+      operationId: createAllocations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAllocationRequest' }
+      responses:
+        '204': { description: Allocations created }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /nodes/{nodeId}/allocations/{allocationId}:
+    delete:
+      tags: [Allocations]
+      summary: Delete an allocation
+      description: Deletes a single allocation. The allocation must not be assigned to a server.
+      operationId: deleteAllocation
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+        - name: allocationId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Allocation deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # SERVERS
+  # ---------------------------------------------------------------------------
+
+  /servers:
+    get:
+      tags: [Servers]
+      summary: List all servers
+      description: Returns a paginated list of servers. Supports filtering on `uuid`, `uuid_short`, `name`, `description`, `image`, `external_id` and sorting on `id`, `uuid`.
+      operationId: listServers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/Sort'
+        - { name: "filter[uuid]", in: query, schema: { type: string } }
+        - { name: "filter[uuid_short]", in: query, schema: { type: string } }
+        - { name: "filter[name]", in: query, schema: { type: string } }
+        - { name: "filter[description]", in: query, schema: { type: string } }
+        - { name: "filter[image]", in: query, schema: { type: string } }
+        - { name: "filter[external_id]", in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated list of servers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerCollection' }
+
+    post:
+      tags: [Servers]
+      summary: Create a server
+      description: |
+        Creates a new server. Use either `allocation` (manual) or `deploy` (automatic) to assign resources — they are mutually exclusive.
+      operationId: createServer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateServerRequest' }
+      responses:
+        '201':
+          description: Server created successfully
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/external/{externalId}:
+    get:
+      tags: [Servers]
+      summary: Get server by external ID
+      operationId: getServerByExternalId
+      parameters:
+        - name: externalId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Server details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverId}:
+    parameters:
+      - $ref: '#/components/parameters/ServerId'
+    get:
+      tags: [Servers]
+      summary: Get a server
+      operationId: getServer
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Server details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    delete:
+      tags: [Servers]
+      summary: Delete a server
+      operationId: deleteServer
+      responses:
+        '204': { description: Server deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverId}/{force}:
+    delete:
+      tags: [Servers]
+      summary: Force-delete a server
+      description: Forcefully deletes a server even if the daemon is unreachable.
+      operationId: forceDeleteServer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+        - name: force
+          in: path
+          required: true
+          description: Must be the literal string `force`
+          schema: { type: string, enum: [force] }
+      responses:
+        '204': { description: Server force-deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverId}/details:
+    patch:
+      tags: [Servers]
+      summary: Update server details
+      description: Update server name, owner, external ID, and description.
+      operationId: updateServerDetails
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateServerDetailsRequest' }
+      responses:
+        '200':
+          description: Updated server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverId}/build:
+    patch:
+      tags: [Servers]
+      summary: Update server build configuration
+      description: Update resource limits, feature limits, and allocation assignments.
+      operationId: updateServerBuild
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateServerBuildRequest' }
+      responses:
+        '200':
+          description: Updated server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverId}/startup:
+    patch:
+      tags: [Servers]
+      summary: Update server startup configuration
+      description: Update startup command, environment variables, egg, Docker image, and install script settings.
+      operationId: updateServerStartup
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateServerStartupRequest' }
+      responses:
+        '200':
+          description: Updated server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverId}/suspend:
+    post:
+      tags: [Servers]
+      summary: Suspend a server
+      operationId: suspendServer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      responses:
+        '204': { description: Server suspended }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverId}/unsuspend:
+    post:
+      tags: [Servers]
+      summary: Unsuspend a server
+      operationId: unsuspendServer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      responses:
+        '204': { description: Server unsuspended }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverId}/reinstall:
+    post:
+      tags: [Servers]
+      summary: Queue server for reinstall
+      description: Marks the server for reinstallation. The install script will be re-run on the next Wings sync.
+      operationId: reinstallServer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      responses:
+        '204': { description: Server queued for reinstall }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverId}/transfer:
+    post:
+      tags: [Servers]
+      summary: Start server transfer
+      description: Initiates a transfer of the server to a different node and allocation.
+      operationId: startServerTransfer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartTransferRequest' }
+      responses:
+        '204': { description: Transfer initiated }
+        '406':
+          description: Transfer not viable (server already transferring or target not suitable)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverId}/transfer/cancel:
+    post:
+      tags: [Servers]
+      summary: Cancel server transfer
+      operationId: cancelServerTransfer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      responses:
+        '204': { description: Transfer cancelled }
+        '406':
+          description: No active transfer to cancel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER DATABASES
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverId}/databases:
+    parameters:
+      - $ref: '#/components/parameters/ServerId'
+    get:
+      tags: [Server Databases]
+      summary: List server databases
+      operationId: listServerDatabases
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: List of server databases
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerDatabaseCollection' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    post:
+      tags: [Server Databases]
+      summary: Create a server database
+      operationId: createServerDatabase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateServerDatabaseRequest' }
+      responses:
+        '201':
+          description: Database created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerDatabaseItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverId}/databases/{databaseId}:
+    parameters:
+      - $ref: '#/components/parameters/ServerId'
+      - name: databaseId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [Server Databases]
+      summary: Get a server database
+      operationId: getServerDatabase
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Database details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerDatabaseItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    delete:
+      tags: [Server Databases]
+      summary: Delete a server database
+      operationId: deleteServerDatabase
+      responses:
+        '204': { description: Database deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverId}/databases/{databaseId}/reset-password:
+    post:
+      tags: [Server Databases]
+      summary: Reset database password
+      description: Rotates the database user password. The new password is only retrievable by fetching the database with `?include=password`.
+      operationId: resetDatabasePassword
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+        - name: databaseId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Password rotated }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # EGGS
+  # ---------------------------------------------------------------------------
+
+  /eggs:
+    get:
+      tags: [Eggs]
+      summary: List all eggs
+      operationId: listEggs
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: List of eggs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EggCollection' }
+
+  /eggs/import:
+    post:
+      tags: [Eggs]
+      summary: Import an egg
+      description: Import an egg definition from a JSON or YAML file upload.
+      operationId: importEgg
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [import_file]
+              properties:
+                import_file:
+                  type: string
+                  format: binary
+                  description: Egg definition file in JSON or YAML format
+      responses:
+        '201':
+          description: Egg imported successfully
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EggItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /eggs/{eggId}:
+    parameters:
+      - $ref: '#/components/parameters/EggId'
+    get:
+      tags: [Eggs]
+      summary: Get an egg
+      operationId: getEgg
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Egg details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EggItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    delete:
+      tags: [Eggs]
+      summary: Delete an egg
+      operationId: deleteEgg
+      responses:
+        '204': { description: Egg deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /eggs/{eggId}/export:
+    get:
+      tags: [Eggs]
+      summary: Export an egg
+      description: Downloads the egg definition as a YAML or JSON file.
+      operationId: exportEgg
+      parameters:
+        - $ref: '#/components/parameters/EggId'
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [yaml, json]
+            default: yaml
+          description: Output format (defaults to YAML)
+      responses:
+        '200':
+          description: Egg definition file download
+          content:
+            application/x-yaml:
+              schema: { type: string, format: binary }
+            application/json:
+              schema: { type: object }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /eggs/uuid/{uuid}:
+    delete:
+      tags: [Eggs]
+      summary: Delete an egg by UUID
+      operationId: deleteEggByUuid
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Egg deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # DATABASE HOSTS
+  # ---------------------------------------------------------------------------
+
+  /database-hosts:
+    get:
+      tags: [Database Hosts]
+      summary: List all database hosts
+      description: Supports filtering on `name`, `host` and sorting on `id`, `name`, `host`.
+      operationId: listDatabaseHosts
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/Sort'
+        - { name: "filter[name]", in: query, schema: { type: string } }
+        - { name: "filter[host]", in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated list of database hosts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabaseHostCollection' }
+
+    post:
+      tags: [Database Hosts]
+      summary: Create a database host
+      operationId: createDatabaseHost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDatabaseHostRequest' }
+      responses:
+        '201':
+          description: Database host created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabaseHostItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /database-hosts/{databaseHostId}:
+    parameters:
+      - name: databaseHostId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [Database Hosts]
+      summary: Get a database host
+      operationId: getDatabaseHost
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Database host details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabaseHostItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [Database Hosts]
+      summary: Update a database host
+      operationId: updateDatabaseHost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateDatabaseHostRequest' }
+      responses:
+        '200':
+          description: Updated database host
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabaseHostItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+    delete:
+      tags: [Database Hosts]
+      summary: Delete a database host
+      operationId: deleteDatabaseHost
+      responses:
+        '204': { description: Database host deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # MOUNTS
+  # ---------------------------------------------------------------------------
+
+  /mounts:
+    get:
+      tags: [Mounts]
+      summary: List all mounts
+      description: Supports filtering on `uuid`, `name` and sorting on `id`, `uuid`.
+      operationId: listMounts
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/Sort'
+        - { name: "filter[uuid]", in: query, schema: { type: string } }
+        - { name: "filter[name]", in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated list of mounts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MountCollection' }
+
+    post:
+      tags: [Mounts]
+      summary: Create a mount
+      operationId: createMount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateMountRequest' }
+      responses:
+        '201':
+          description: Mount created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MountItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /mounts/{mountId}:
+    parameters:
+      - $ref: '#/components/parameters/MountId'
+    get:
+      tags: [Mounts]
+      summary: Get a mount
+      operationId: getMount
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Mount details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MountItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [Mounts]
+      summary: Update a mount
+      operationId: updateMount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMountRequest' }
+      responses:
+        '200':
+          description: Updated mount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MountItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+    delete:
+      tags: [Mounts]
+      summary: Delete a mount
+      description: Deletes a mount. The mount must not have any attached servers.
+      operationId: deleteMount
+      responses:
+        '204': { description: Mount deleted }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /mounts/{mountId}/eggs:
+    get:
+      tags: [Mounts]
+      summary: List eggs assigned to a mount
+      operationId: getMountEggs
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: List of assigned eggs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EggCollection' }
+
+    post:
+      tags: [Mounts]
+      summary: Assign eggs to a mount
+      operationId: addMountEggs
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eggs]
+              properties:
+                eggs:
+                  type: array
+                  items: { type: integer }
+                  description: Egg IDs to attach to this mount
+                  example: [1, 2, 3]
+      responses:
+        '200':
+          description: Updated mount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MountItem' }
+
+  /mounts/{mountId}/eggs/{eggId}:
+    delete:
+      tags: [Mounts]
+      summary: Remove egg from a mount
+      operationId: removeMountEgg
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+        - name: eggId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Egg detached from mount }
+
+  /mounts/{mountId}/nodes:
+    get:
+      tags: [Mounts]
+      summary: List nodes assigned to a mount
+      operationId: getMountNodes
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: List of assigned nodes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeCollection' }
+
+    post:
+      tags: [Mounts]
+      summary: Assign nodes to a mount
+      operationId: addMountNodes
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nodes]
+              properties:
+                nodes:
+                  type: array
+                  items: { type: integer }
+                  description: Node IDs to attach to this mount
+                  example: [1, 2]
+      responses:
+        '200':
+          description: Updated mount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MountItem' }
+
+  /mounts/{mountId}/nodes/{nodeId}:
+    delete:
+      tags: [Mounts]
+      summary: Remove node from a mount
+      operationId: removeMountNode
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+        - name: nodeId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Node detached from mount }
+
+  /mounts/{mountId}/servers:
+    get:
+      tags: [Mounts]
+      summary: List servers assigned to a mount
+      operationId: getMountServers
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: List of assigned servers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerCollection' }
+
+    post:
+      tags: [Mounts]
+      summary: Assign servers to a mount
+      operationId: addMountServers
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [servers]
+              properties:
+                servers:
+                  type: array
+                  items: { type: integer }
+                  description: Server IDs to attach to this mount
+                  example: [1, 2]
+      responses:
+        '200':
+          description: Updated mount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MountItem' }
+
+  /mounts/{mountId}/servers/{serverId}:
+    delete:
+      tags: [Mounts]
+      summary: Remove server from a mount
+      operationId: removeMountServer
+      parameters:
+        - $ref: '#/components/parameters/MountId'
+        - name: serverId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Server detached from mount }
+
+  # ---------------------------------------------------------------------------
+  # ROLES
+  # ---------------------------------------------------------------------------
+
+  /roles:
+    get:
+      tags: [Roles]
+      summary: List all roles
+      description: Supports filtering on `id`, `name` and sorting on `id`, `name`.
+      operationId: listRoles
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/Sort'
+        - { name: "filter[id]", in: query, schema: { type: integer } }
+        - { name: "filter[name]", in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated list of roles
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleCollection' }
+
+    post:
+      tags: [Roles]
+      summary: Create a role
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRoleRequest' }
+      responses:
+        '201':
+          description: Role created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /roles/{roleId}:
+    parameters:
+      - $ref: '#/components/parameters/RoleId'
+    get:
+      tags: [Roles]
+      summary: Get a role
+      operationId: getRole
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Role details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [Roles]
+      summary: Update a role
+      description: Updates a role. The built-in **Root Admin** role cannot be modified.
+      operationId: updateRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRoleRequest' }
+      responses:
+        '200':
+          description: Updated role
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+    delete:
+      tags: [Roles]
+      summary: Delete a role
+      description: Deletes a role. The built-in **Root Admin** role cannot be deleted.
+      operationId: deleteRole
+      responses:
+        '204': { description: Role deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # PLUGINS
+  # ---------------------------------------------------------------------------
+
+  /plugins:
+    get:
+      tags: [Plugins]
+      summary: List all plugins
+      description: Supports filtering on `id`, `name`, `author`, `category` and sorting on `id`, `name`, `author`, `category`.
+      operationId: listPlugins
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - $ref: '#/components/parameters/Sort'
+        - { name: "filter[id]", in: query, schema: { type: integer } }
+        - { name: "filter[name]", in: query, schema: { type: string } }
+        - { name: "filter[author]", in: query, schema: { type: string } }
+        - { name: "filter[category]", in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Paginated list of plugins
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginCollection' }
+
+  /plugins/import/file:
+    post:
+      tags: [Plugins]
+      summary: Import plugin from file upload
+      operationId: importPluginFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Plugin archive file
+      responses:
+        '201': { description: Plugin imported }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /plugins/import/url:
+    post:
+      tags: [Plugins]
+      summary: Import plugin from URL
+      operationId: importPluginUrl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: Direct download URL for the plugin archive
+                  example: https://example.com/my-plugin.zip
+      responses:
+        '201': { description: Plugin imported }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /plugins/{pluginId}:
+    parameters:
+      - $ref: '#/components/parameters/PluginId'
+    get:
+      tags: [Plugins]
+      summary: Get a plugin
+      operationId: getPlugin
+      responses:
+        '200':
+          description: Plugin details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /plugins/{pluginId}/install:
+    post:
+      tags: [Plugins]
+      summary: Install a plugin
+      description: Installs a plugin that is currently in the `NotInstalled` state.
+      operationId: installPlugin
+      parameters:
+        - $ref: '#/components/parameters/PluginId'
+      responses:
+        '200':
+          description: Plugin installation started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /plugins/{pluginId}/update:
+    post:
+      tags: [Plugins]
+      summary: Update a plugin
+      description: Updates a plugin if a newer version is available.
+      operationId: updatePlugin
+      parameters:
+        - $ref: '#/components/parameters/PluginId'
+      responses:
+        '200':
+          description: Plugin updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /plugins/{pluginId}/uninstall:
+    post:
+      tags: [Plugins]
+      summary: Uninstall a plugin
+      operationId: uninstallPlugin
+      parameters:
+        - $ref: '#/components/parameters/PluginId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                delete:
+                  type: boolean
+                  default: false
+                  description: Whether to also delete the plugin files from disk
+      responses:
+        '200':
+          description: Plugin uninstalled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /plugins/{pluginId}/enable:
+    post:
+      tags: [Plugins]
+      summary: Enable a plugin
+      operationId: enablePlugin
+      parameters:
+        - $ref: '#/components/parameters/PluginId'
+      responses:
+        '200':
+          description: Plugin enabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /plugins/{pluginId}/disable:
+    post:
+      tags: [Plugins]
+      summary: Disable a plugin
+      operationId: disablePlugin
+      parameters:
+        - $ref: '#/components/parameters/PluginId'
+      responses:
+        '200':
+          description: Plugin disabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PluginItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key belonging to an administrator account. Generate under Account > API Keys in the panel.
+
+  # ---------------------------------------------------------------------------
+  # REUSABLE PARAMETERS
+  # ---------------------------------------------------------------------------
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: Page number
+      schema: { type: integer, minimum: 1, default: 1 }
+
+    Sort:
+      name: sort
+      in: query
+      description: Sort field. Prefix with `-` for descending order (e.g. `sort=-id`).
+      schema: { type: string }
+
+    Include:
+      name: include
+      in: query
+      description: Comma-separated related resources to eager-load (e.g. `include=user,allocations`).
+      schema: { type: string }
+
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: User ID
+      schema: { type: integer }
+
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      description: Node ID
+      schema: { type: integer }
+
+    ServerId:
+      name: serverId
+      in: path
+      required: true
+      description: Server ID
+      schema: { type: integer }
+
+    EggId:
+      name: eggId
+      in: path
+      required: true
+      description: Egg ID
+      schema: { type: integer }
+
+    MountId:
+      name: mountId
+      in: path
+      required: true
+      description: Mount ID
+      schema: { type: integer }
+
+    RoleId:
+      name: roleId
+      in: path
+      required: true
+      description: Role ID
+      schema: { type: integer }
+
+    PluginId:
+      name: pluginId
+      in: path
+      required: true
+      description: Plugin ID
+      schema: { type: integer }
+
+  # ---------------------------------------------------------------------------
+  # REUSABLE RESPONSES
+  # ---------------------------------------------------------------------------
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    Conflict:
+      description: Resource conflict (e.g. node still has servers)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationErrorResponse' }
+
+  # ---------------------------------------------------------------------------
+  # SCHEMAS
+  # ---------------------------------------------------------------------------
+
+  schemas:
+
+    # =========================================================================
+    # ERROR SCHEMAS
+    # =========================================================================
+
+    ErrorDetail:
+      type: object
+      properties:
+        code:
+          type: string
+          example: NotFoundHttpException
+        status:
+          type: string
+          example: "404"
+        detail:
+          type: string
+          example: The requested resource does not exist on this server.
+
+    ErrorResponse:
+      type: object
+      properties:
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ErrorDetail' }
+
+    ValidationErrorDetail:
+      type: object
+      properties:
+        code:
+          type: string
+          example: ValidationException
+        status:
+          type: string
+          example: "422"
+        detail:
+          type: string
+          example: The name field is required.
+        source:
+          type: object
+          properties:
+            field:
+              type: string
+              example: name
+        meta:
+          type: object
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ValidationErrorDetail' }
+
+    # =========================================================================
+    # PAGINATION
+    # =========================================================================
+
+    PaginationLinks:
+      type: object
+      properties:
+        previous:
+          type: string
+          nullable: true
+          example: "https://panel.example.com/api/application/users?page=1"
+        next:
+          type: string
+          nullable: true
+          example: "https://panel.example.com/api/application/users?page=3"
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 100
+        count:
+          type: integer
+          example: 50
+        per_page:
+          type: integer
+          example: 50
+        current_page:
+          type: integer
+          example: 2
+        total_pages:
+          type: integer
+          example: 2
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+
+    # =========================================================================
+    # USER SCHEMAS
+    # =========================================================================
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        external_id:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: ext-user-123
+        is_managed_externally:
+          type: boolean
+          description: Whether this account is managed by an external identity provider
+          example: false
+        uuid:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        username:
+          type: string
+          example: jsmith
+        email:
+          type: string
+          format: email
+          example: jsmith@example.com
+        language:
+          type: string
+          description: Locale code used for the panel UI
+          example: en
+        root_admin:
+          type: boolean
+          description: Whether the user has root admin access
+          example: false
+        2fa_enabled:
+          type: boolean
+          description: Whether any 2FA method is currently active
+          example: false
+        2fa:
+          type: boolean
+          deprecated: true
+          description: "Deprecated — use `2fa_enabled` instead"
+          example: false
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+
+    UserItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: user
+        attributes:
+          $ref: '#/components/schemas/User'
+        meta:
+          type: object
+          description: Only present on creation (201) or when token revocation errors occur
+          properties:
+            resource:
+              type: string
+              description: Canonical URL of the created resource
+              example: "https://panel.example.com/api/application/users/1"
+            revocation_errors:
+              type: array
+              description: Errors encountered revoking existing tokens on update
+              items: { type: string }
+
+    UserCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/UserItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    CreateUserRequest:
+      type: object
+      required: [email, username, password]
+      properties:
+        external_id:
+          type: string
+          nullable: true
+          maxLength: 255
+          description: Unique identifier from an external system
+          example: ext-user-123
+        is_managed_externally:
+          type: boolean
+          default: false
+          description: Mark this account as externally managed
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 255
+          example: newuser@example.com
+        username:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: newuser
+        password:
+          type: string
+          format: password
+          description: Plain-text password (will be hashed)
+          example: "S3cur3P@ssw0rd!"
+        language:
+          type: string
+          description: Locale code (must be a supported panel locale)
+          example: en
+        timezone:
+          type: string
+          description: PHP DateTimeZone identifier
+          example: America/New_York
+
+    UpdateUserRequest:
+      type: object
+      description: All fields are optional; only provided fields will be updated.
+      properties:
+        external_id:
+          type: string
+          nullable: true
+          maxLength: 255
+        is_managed_externally:
+          type: boolean
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 255
+        username:
+          type: string
+          minLength: 1
+          maxLength: 255
+        password:
+          type: string
+          format: password
+          nullable: true
+          description: Omit to keep the current password
+        language:
+          type: string
+        timezone:
+          type: string
+
+    AssignRolesRequest:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items: { type: integer }
+          description: Array of role IDs to assign or remove
+          example: [1, 2]
+
+    # =========================================================================
+    # NODE SCHEMAS
+    # =========================================================================
+
+    NodeAllocatedResources:
+      type: object
+      description: Sum of resources currently consumed by servers on this node
+      properties:
+        memory:
+          type: integer
+          description: Allocated memory in MB
+          example: 4096
+        disk:
+          type: integer
+          description: Allocated disk in MB
+          example: 51200
+        cpu:
+          type: integer
+          description: Allocated CPU percentage
+          example: 100
+
+    Node:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        uuid:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        public:
+          type: boolean
+          description: Whether the node appears in auto-deployment pools
+          example: true
+        name:
+          type: string
+          example: US-East-01
+        description:
+          type: string
+          nullable: true
+          example: Primary US East Coast node
+        fqdn:
+          type: string
+          description: Fully-qualified domain name or IP of the Wings daemon host
+          example: node01.example.com
+        scheme:
+          type: string
+          enum: [http, https]
+          example: https
+        behind_proxy:
+          type: boolean
+          description: Whether Wings is running behind a reverse proxy
+          example: false
+        maintenance_mode:
+          type: boolean
+          description: When true, servers on this node will not be startable
+          example: false
+        memory:
+          type: integer
+          description: Total memory available on the node (MB)
+          example: 16384
+        memory_overallocate:
+          type: integer
+          description: "Over-allocation percentage. `-1` = unlimited, `0` = no over-allocation"
+          example: 0
+        disk:
+          type: integer
+          description: Total disk available on the node (MB)
+          example: 204800
+        disk_overallocate:
+          type: integer
+          description: "Over-allocation percentage. `-1` = unlimited, `0` = no over-allocation"
+          example: 0
+        cpu:
+          type: integer
+          description: Total CPU available (percentage of host CPUs × 100)
+          example: 400
+        cpu_overallocate:
+          type: integer
+          description: "Over-allocation percentage. `-1` = unlimited, `0` = no over-allocation"
+          example: 0
+        upload_size:
+          type: integer
+          description: Maximum file upload size in bytes
+          example: 104857600
+        daemon_listen:
+          type: integer
+          description: Wings API listening port
+          example: 8080
+        daemon_connect:
+          type: integer
+          description: Port the panel uses to reach Wings (may differ from daemon_listen behind a proxy)
+          example: 443
+        daemon_sftp:
+          type: integer
+          description: Wings SFTP listening port
+          example: 2022
+        daemon_sftp_alias:
+          type: string
+          nullable: true
+          description: Hostname users connect to for SFTP (overrides fqdn)
+          example: sftp.example.com
+        daemon_base:
+          type: string
+          description: Base directory on the host where server data is stored
+          example: /var/lib/pelican/volumes
+        tags:
+          type: array
+          items: { type: string }
+          description: Arbitrary tags used for deployment targeting
+          example: [us-east, high-memory]
+        allocated_resources:
+          $ref: '#/components/schemas/NodeAllocatedResources'
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+
+    NodeItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: node
+        attributes:
+          $ref: '#/components/schemas/Node'
+        meta:
+          type: object
+          description: Only present on creation (201)
+          properties:
+            resource:
+              type: string
+              example: "https://panel.example.com/api/application/nodes/1"
+
+    NodeCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/NodeItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    CreateNodeRequest:
+      type: object
+      required: [name, fqdn, scheme, memory, memory_overallocate, disk, disk_overallocate, cpu, cpu_overallocate, daemon_sftp, daemon_listen, daemon_connect]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: US-East-01
+        description:
+          type: string
+          nullable: true
+          example: Primary US East Coast node
+        public:
+          type: boolean
+          default: true
+        fqdn:
+          type: string
+          description: "Cannot be `0.0.0.0`, `127.0.0.1`, or `localhost`"
+          example: node01.example.com
+        scheme:
+          type: string
+          enum: [http, https]
+          example: https
+        behind_proxy:
+          type: boolean
+          default: false
+        memory:
+          type: integer
+          minimum: 0
+          description: Total memory in MB
+          example: 16384
+        memory_overallocate:
+          type: integer
+          minimum: -1
+          description: "Over-allocation %. Use `-1` for unlimited."
+          example: 0
+        disk:
+          type: integer
+          minimum: 0
+          description: Total disk in MB
+          example: 204800
+        disk_overallocate:
+          type: integer
+          minimum: -1
+          example: 0
+        cpu:
+          type: integer
+          minimum: 0
+          description: Total CPU %
+          example: 400
+        cpu_overallocate:
+          type: integer
+          minimum: -1
+          example: 0
+        daemon_base:
+          type: string
+          description: Absolute path to server data directory on the host
+          example: /var/lib/pelican/volumes
+        daemon_sftp:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 2022
+        daemon_sftp_alias:
+          type: string
+          nullable: true
+          description: Optional SFTP hostname alias shown to users
+          example: sftp.example.com
+        daemon_listen:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 8080
+        daemon_connect:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Port the panel uses to connect to Wings
+          example: 443
+        upload_size:
+          type: integer
+          minimum: 1
+          description: Maximum file upload size in bytes
+          example: 104857600
+        tags:
+          type: array
+          items: { type: string }
+          example: [us-east]
+        maintenance_mode:
+          type: boolean
+          default: false
+
+    UpdateNodeRequest:
+      type: object
+      description: All fields optional. Only provided fields are updated.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          nullable: true
+        public:
+          type: boolean
+        fqdn:
+          type: string
+        scheme:
+          type: string
+          enum: [http, https]
+        behind_proxy:
+          type: boolean
+        memory:
+          type: integer
+          minimum: 0
+        memory_overallocate:
+          type: integer
+          minimum: -1
+        disk:
+          type: integer
+          minimum: 0
+        disk_overallocate:
+          type: integer
+          minimum: -1
+        cpu:
+          type: integer
+          minimum: 0
+        cpu_overallocate:
+          type: integer
+          minimum: -1
+        daemon_base:
+          type: string
+        daemon_sftp:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        daemon_sftp_alias:
+          type: string
+          nullable: true
+        daemon_listen:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        daemon_connect:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        upload_size:
+          type: integer
+          minimum: 1
+        tags:
+          type: array
+          items: { type: string }
+        maintenance_mode:
+          type: boolean
+        reset_secret:
+          type: boolean
+          default: false
+          description: When `true`, regenerates the Wings daemon authentication token
+
+    NodeConfiguration:
+      type: object
+      description: Wings daemon bootstrap configuration (sensitive — contains authentication tokens)
+      properties:
+        debug:
+          type: boolean
+          example: false
+        uuid:
+          type: string
+          format: uuid
+        token_id:
+          type: string
+          description: Public part of the daemon authentication token
+          example: abc123def456ghij
+        token:
+          type: string
+          description: Secret part of the daemon authentication token (64 characters)
+          example: "very-long-64-character-secret-token-used-by-wings-daemon-here"
+        api:
+          type: object
+          properties:
+            host:
+              type: string
+              example: "0.0.0.0"
+            port:
+              type: integer
+              example: 8080
+            ssl:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                  example: true
+                cert:
+                  type: string
+                  example: /etc/letsencrypt/live/node.example.com/fullchain.pem
+                key:
+                  type: string
+                  example: /etc/letsencrypt/live/node.example.com/privkey.pem
+            upload_limit:
+              type: integer
+              description: Max upload size in MB
+              example: 100
+        system:
+          type: object
+          properties:
+            data:
+              type: string
+              description: Server data directory
+              example: /var/lib/pelican/volumes
+            sftp:
+              type: object
+              properties:
+                bind_port:
+                  type: integer
+                  example: 2022
+        allowed_mounts:
+          type: array
+          items: { type: string }
+          description: Host paths that may be bind-mounted into containers
+          example: [/mnt/shared/configs]
+        remote:
+          type: string
+          description: Panel base URL
+          example: https://panel.example.com
+
+    # =========================================================================
+    # ALLOCATION SCHEMAS
+    # =========================================================================
+
+    Allocation:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        ip:
+          type: string
+          description: IP address of the allocation
+          example: "192.168.1.100"
+        alias:
+          type: string
+          nullable: true
+          description: IP alias if set, otherwise equals `ip`
+          example: null
+        port:
+          type: integer
+          minimum: 1024
+          maximum: 65535
+          example: 25565
+        notes:
+          type: string
+          nullable: true
+          maxLength: 256
+          description: Optional human-readable note
+          example: Minecraft Java Edition
+        assigned:
+          type: boolean
+          description: Whether this allocation is attached to a server
+          example: false
+
+    AllocationItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: allocation
+        attributes:
+          $ref: '#/components/schemas/Allocation'
+
+    AllocationCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/AllocationItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    CreateAllocationRequest:
+      type: object
+      required: [ip, ports]
+      properties:
+        ip:
+          type: string
+          description: IP address to assign these ports on
+          example: "192.168.1.100"
+        alias:
+          type: string
+          nullable: true
+          maxLength: 255
+          description: Optional hostname alias for this IP
+          example: mc.example.com
+        ports:
+          type: array
+          items: { type: string }
+          description: |
+            Individual ports (`"25565"`) or ranges (`"25565-25575"`).
+            Multiple entries are supported.
+          example: ["25565", "25566-25570"]
+
+    # =========================================================================
+    # SERVER SCHEMAS
+    # =========================================================================
+
+    ServerLimits:
+      type: object
+      properties:
+        memory:
+          type: integer
+          description: Memory limit in MB (`0` = unlimited)
+          example: 1024
+        swap:
+          type: integer
+          description: "Swap limit in MB (`-1` = unlimited, `0` = disabled)"
+          example: 0
+        disk:
+          type: integer
+          description: Disk limit in MB (`0` = unlimited)
+          example: 10240
+        io:
+          type: integer
+          description: Block I/O weight (0–1000)
+          example: 500
+        cpu:
+          type: integer
+          description: CPU limit as a percentage of a single core (100 = 1 core)
+          example: 100
+        threads:
+          type: string
+          nullable: true
+          description: "CPU core pinning expression (e.g. `\"0,1\"` or `\"0-3\"`)"
+          example: null
+        oom_disabled:
+          type: boolean
+          deprecated: true
+          description: "Deprecated — use `oom_killer` instead"
+        oom_killer:
+          type: boolean
+          description: Whether the Linux OOM killer is allowed to terminate this container
+          example: false
+
+    ServerFeatureLimits:
+      type: object
+      properties:
+        databases:
+          type: integer
+          nullable: true
+          description: Maximum number of databases (`null` = unlimited)
+          example: 5
+        allocations:
+          type: integer
+          nullable: true
+          description: Maximum number of additional allocations
+          example: 5
+        backups:
+          type: integer
+          nullable: true
+          description: Maximum number of backups
+          example: 10
+
+    ServerContainer:
+      type: object
+      properties:
+        startup_command:
+          type: string
+          description: Effective startup command (may include egg variable placeholders)
+          example: "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}"
+        image:
+          type: string
+          description: Docker image in use
+          example: "ghcr.io/pterodactyl/yolks:java_17"
+        installed:
+          type: integer
+          enum: [0, 1]
+          deprecated: true
+          description: Deprecated integer flag for installation status
+        environment:
+          type: object
+          additionalProperties: { type: string }
+          description: Resolved environment variables for this server
+          example:
+            SERVER_JARFILE: server.jar
+            MC_VERSION: latest
+
+    Server:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        external_id:
+          type: string
+          nullable: true
+          example: null
+        uuid:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        identifier:
+          type: string
+          description: Short 8-character UUID used in URLs
+          example: a1b2c3d4
+        name:
+          type: string
+          example: My Minecraft Server
+        description:
+          type: string
+          example: Survival Minecraft SMP
+        status:
+          type: string
+          nullable: true
+          description: "`null` = fully running/normal. Any other value is a transient or error state."
+          enum:
+            - installing
+            - running
+            - suspended
+            - stopping
+            - stopped
+            - install_failed
+            - reinstall_failed
+            - restoring_backup
+            - transferring
+          example: null
+        suspended:
+          type: boolean
+          deprecated: true
+          description: "Deprecated — check `status == 'suspended'` instead"
+        limits:
+          $ref: '#/components/schemas/ServerLimits'
+        feature_limits:
+          $ref: '#/components/schemas/ServerFeatureLimits'
+        user:
+          type: integer
+          description: Owner user ID
+          example: 1
+        node:
+          type: integer
+          description: Node ID
+          example: 1
+        allocation:
+          type: integer
+          description: Default allocation ID
+          example: 1
+        egg:
+          type: integer
+          description: Egg ID
+          example: 1
+        container:
+          $ref: '#/components/schemas/ServerContainer'
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+
+    ServerItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: server
+        attributes:
+          $ref: '#/components/schemas/Server'
+        meta:
+          type: object
+          description: Only present on creation (201)
+          properties:
+            resource:
+              type: string
+              example: "https://panel.example.com/api/application/servers/1"
+
+    ServerCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ServerItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    ServerLimitsInput:
+      type: object
+      required: [memory, swap, disk, io, cpu]
+      properties:
+        memory:
+          type: integer
+          minimum: 0
+          example: 1024
+        swap:
+          type: integer
+          minimum: -1
+          example: 0
+        disk:
+          type: integer
+          minimum: 0
+          example: 10240
+        io:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          example: 500
+        cpu:
+          type: integer
+          minimum: 0
+          example: 100
+        threads:
+          type: string
+          nullable: true
+          example: null
+
+    ServerFeatureLimitsInput:
+      type: object
+      properties:
+        databases:
+          type: integer
+          nullable: true
+          minimum: 0
+          example: 5
+        allocations:
+          type: integer
+          nullable: true
+          minimum: 0
+          example: 5
+        backups:
+          type: integer
+          nullable: true
+          minimum: 0
+          example: 10
+
+    CreateServerRequest:
+      type: object
+      required: [name, user, egg, environment]
+      properties:
+        external_id:
+          type: string
+          nullable: true
+          maxLength: 255
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: My Minecraft Server
+        description:
+          type: string
+          nullable: true
+          example: Survival SMP
+        user:
+          type: integer
+          description: Owner user ID
+          example: 1
+        egg:
+          type: integer
+          description: Egg ID to use for this server
+          example: 1
+        docker_image:
+          type: string
+          description: Docker image override. Uses the egg's default image if omitted.
+          example: "ghcr.io/pterodactyl/yolks:java_17"
+        startup:
+          type: string
+          description: Startup command override. Uses the egg's startup command if omitted.
+        environment:
+          type: object
+          description: Environment variable values. Must be present (use `{}` if none needed).
+          additionalProperties: {}
+          example:
+            SERVER_JARFILE: server.jar
+            MC_VERSION: latest
+        skip_scripts:
+          type: boolean
+          default: false
+          description: Skip running the egg's install scripts
+        oom_killer:
+          type: boolean
+          default: false
+        limits:
+          $ref: '#/components/schemas/ServerLimitsInput'
+        feature_limits:
+          $ref: '#/components/schemas/ServerFeatureLimitsInput'
+        allocation:
+          type: object
+          description: |
+            Manual allocation assignment. Use this **or** `deploy`, not both.
+          properties:
+            default:
+              type: integer
+              description: Primary allocation ID (must be currently unassigned)
+              example: 1
+            additional:
+              type: array
+              items: { type: integer }
+              description: Additional allocation IDs to attach (must be unassigned)
+              example: [2, 3]
+        deploy:
+          type: object
+          description: |
+            Automatic deployment criteria. The panel will select a suitable node and allocation.
+            Use this **or** `allocation`, not both.
+          properties:
+            tags:
+              type: array
+              items: { type: string }
+              description: Only deploy to nodes matching all of these tags
+              example: [us-east]
+            locations:
+              type: array
+              items: { type: integer }
+              deprecated: true
+              description: Deprecated. Use `tags` instead.
+            dedicated_ip:
+              type: boolean
+              description: Require an IP with no other server allocations
+              example: false
+            port_range:
+              type: array
+              items: { type: string }
+              description: Restrict port selection to these ranges
+              example: ["25565-25600"]
+        start_on_completion:
+          type: boolean
+          default: false
+          description: Automatically start the server once the install script finishes
+
+    UpdateServerDetailsRequest:
+      type: object
+      description: All fields are optional.
+      properties:
+        external_id:
+          type: string
+          nullable: true
+          maxLength: 255
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        user:
+          type: integer
+          description: New owner user ID
+        description:
+          type: string
+          nullable: true
+
+    UpdateServerBuildRequest:
+      type: object
+      description: All fields are optional.
+      properties:
+        allocation:
+          type: integer
+          description: New default allocation ID (must be attached to this server)
+        oom_killer:
+          type: boolean
+        limits:
+          type: object
+          properties:
+            memory:
+              type: integer
+              minimum: 0
+            swap:
+              type: integer
+              minimum: -1
+            disk:
+              type: integer
+              minimum: 0
+            io:
+              type: integer
+              minimum: 0
+              maximum: 1000
+            cpu:
+              type: integer
+              minimum: 0
+            threads:
+              type: string
+              nullable: true
+        feature_limits:
+          $ref: '#/components/schemas/ServerFeatureLimitsInput'
+        add_allocations:
+          type: array
+          items: { type: integer }
+          description: Allocation IDs to attach to this server
+          example: [5, 6]
+        remove_allocations:
+          type: array
+          items: { type: integer }
+          description: Allocation IDs to detach from this server
+          example: [2]
+
+    UpdateServerStartupRequest:
+      type: object
+      required: [environment, skip_scripts]
+      properties:
+        startup:
+          type: string
+          description: Override startup command
+        environment:
+          type: object
+          additionalProperties: {}
+          description: Full set of environment variable values
+        egg:
+          type: integer
+          description: New egg ID
+        image:
+          type: string
+          description: Docker image override
+        skip_scripts:
+          type: boolean
+          description: Whether to skip install scripts on next reinstall
+
+    StartTransferRequest:
+      type: object
+      required: [node_id, allocation_id]
+      properties:
+        node_id:
+          type: integer
+          description: Destination node ID
+          example: 2
+        allocation_id:
+          type: integer
+          description: Destination primary allocation ID (must be unassigned)
+          example: 10
+        allocation_additional:
+          type: array
+          nullable: true
+          items: { type: integer }
+          description: Additional allocation IDs to transfer alongside
+          example: [11, 12]
+
+    # =========================================================================
+    # SERVER DATABASE SCHEMAS
+    # =========================================================================
+
+    ServerDatabase:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        server:
+          type: integer
+          description: Server ID
+          example: 1
+        host:
+          type: integer
+          description: Database host ID
+          example: 1
+        database:
+          type: string
+          description: Database name (prefixed by the panel, e.g. `s1_mydb`)
+          example: s1_mydb
+        username:
+          type: string
+          description: Database user (prefixed by the panel, e.g. `u1_mydb`)
+          example: u1_mydb
+        remote:
+          type: string
+          description: Allowed connection host pattern
+          example: "%"
+        max_connections:
+          type: integer
+          nullable: true
+          description: Maximum connections (`null` = unlimited)
+          example: null
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+
+    ServerDatabaseItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: server_database
+        attributes:
+          $ref: '#/components/schemas/ServerDatabase'
+        meta:
+          type: object
+          description: Only present on creation (201)
+          properties:
+            resource:
+              type: string
+
+    ServerDatabaseCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ServerDatabaseItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    CreateServerDatabaseRequest:
+      type: object
+      required: [database, remote, host]
+      properties:
+        database:
+          type: string
+          pattern: '^[a-zA-Z0-9_\-]+$'
+          minLength: 1
+          maxLength: 48
+          description: Database name suffix. The panel prefixes this with the server ID (e.g. `s1_`).
+          example: mydb
+        remote:
+          type: string
+          description: |
+            Allowed remote connection host. Use `%` to allow connections from any host.
+            Supports IP addresses and wildcard patterns.
+          example: "%"
+        host:
+          type: integer
+          description: Database host ID
+          example: 1
+
+    # =========================================================================
+    # EGG SCHEMAS
+    # =========================================================================
+
+    EggConfig:
+      type: object
+      description: Inherited server configuration
+      properties:
+        files:
+          type: array
+          items: {}
+          description: Configuration file templates for auto-population
+        startup:
+          type: object
+          description: Startup detection configuration (done/user interaction strings)
+        stop:
+          type: string
+          description: Command sent to stop the server process
+          example: "^C"
+        logs:
+          type: array
+          items: {}
+          description: Log file configuration
+        file_denylist:
+          type: array
+          items: { type: string }
+          description: Files that users are not allowed to edit
+          example: [server.properties]
+        extends:
+          type: integer
+          nullable: true
+          description: Parent egg ID this config inherits from
+
+    EggScript:
+      type: object
+      properties:
+        privileged:
+          type: boolean
+          description: Whether the install script container runs in privileged mode
+          example: false
+        install:
+          type: string
+          nullable: true
+          description: Shell script content run during server installation
+        entry:
+          type: string
+          description: Script entrypoint
+          example: bash
+        container:
+          type: string
+          description: Docker image used to run the install script
+          example: "ghcr.io/pterodactyl/installers:alpine"
+        extends:
+          type: integer
+          nullable: true
+          description: Parent egg ID this script is inherited from
+
+    Egg:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        uuid:
+          type: string
+          example: "PLCN_v3-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        name:
+          type: string
+          example: Vanilla Minecraft
+        author:
+          type: string
+          format: email
+          example: support@pelican.dev
+        description:
+          type: string
+          nullable: true
+          example: Vanilla Minecraft server
+        image:
+          type: string
+          nullable: true
+          description: Icon image URL
+          example: null
+        features:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: Special panel feature flags (e.g. `eula`)
+          example: [eula]
+        tags:
+          type: array
+          items: { type: string }
+          example: [minecraft, java]
+        docker_image:
+          type: string
+          deprecated: true
+          description: "Deprecated — first entry from `docker_images`"
+          example: "ghcr.io/pterodactyl/yolks:java_17"
+        docker_images:
+          type: object
+          additionalProperties: { type: string }
+          description: Available Docker images keyed by display name
+          example:
+            Java 17: "ghcr.io/pterodactyl/yolks:java_17"
+            Java 21: "ghcr.io/pterodactyl/yolks:java_21"
+        config:
+          $ref: '#/components/schemas/EggConfig'
+        startup:
+          type: string
+          deprecated: true
+          description: "Deprecated — first entry from `startup_commands`"
+          example: "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}"
+        startup_commands:
+          type: array
+          items: { type: string }
+          description: Available startup command templates
+          example: ["java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}"]
+        script:
+          $ref: '#/components/schemas/EggScript'
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+
+    EggItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: egg
+        attributes:
+          $ref: '#/components/schemas/Egg'
+        meta:
+          type: object
+          description: Only present on creation (201)
+          properties:
+            resource:
+              type: string
+
+    EggCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/EggItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    # =========================================================================
+    # DATABASE HOST SCHEMAS
+    # =========================================================================
+
+    DatabaseHost:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Primary MySQL
+        host:
+          type: string
+          description: Hostname or IP address of the MySQL/MariaDB server
+          example: "127.0.0.1"
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 3306
+        username:
+          type: string
+          description: Admin database username (password is never returned)
+          example: pelican
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+
+    DatabaseHostItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: database_host
+        attributes:
+          $ref: '#/components/schemas/DatabaseHost'
+        meta:
+          type: object
+          description: Only present on creation (201)
+          properties:
+            resource:
+              type: string
+
+    DatabaseHostCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/DatabaseHostItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    CreateDatabaseHostRequest:
+      type: object
+      required: [name, host, port, username]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: Primary MySQL
+        host:
+          type: string
+          description: Hostname or IP of the database server
+          example: "127.0.0.1"
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 3306
+        username:
+          type: string
+          maxLength: 32
+          description: Database admin username
+          example: pelican
+        password:
+          type: string
+          format: password
+          nullable: true
+          description: Database admin password
+          example: "s3cr3t"
+        node_ids:
+          type: array
+          nullable: true
+          items: { type: integer }
+          description: Node IDs to associate this host with (for per-node default host selection)
+          example: [1, 2]
+
+    UpdateDatabaseHostRequest:
+      type: object
+      description: All fields optional.
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        host:
+          type: string
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        username:
+          type: string
+          maxLength: 32
+        password:
+          type: string
+          format: password
+          nullable: true
+          description: Set a new password. Send `null` to clear.
+        node_ids:
+          type: array
+          nullable: true
+          items: { type: integer }
+
+    # =========================================================================
+    # MOUNT SCHEMAS
+    # =========================================================================
+
+    Mount:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        uuid:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        name:
+          type: string
+          example: shared-configs
+        description:
+          type: string
+          nullable: true
+          example: Shared configuration files across all game servers
+        source:
+          type: string
+          description: Absolute host path that is bind-mounted
+          example: /mnt/shared/configs
+        target:
+          type: string
+          description: Absolute container path the source is mounted at
+          example: /configs
+        read_only:
+          type: boolean
+          description: Whether the mount is read-only inside containers
+          example: false
+        user_mountable:
+          type: boolean
+          description: Whether users can toggle this mount themselves
+          example: false
+
+    MountItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: mount
+        attributes:
+          $ref: '#/components/schemas/Mount'
+        meta:
+          type: object
+          description: Only present on creation (201)
+          properties:
+            resource:
+              type: string
+
+    MountCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/MountItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    CreateMountRequest:
+      type: object
+      required: [name, source, target]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 64
+          description: Unique mount name
+          example: shared-configs
+        description:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: Shared configuration files
+        source:
+          type: string
+          description: |
+            Absolute host filesystem path.
+            The following paths are **blocked**: `/etc/pelican`, `/var/lib/pelican/volumes`, `/srv/daemon-data`
+          example: /mnt/shared/configs
+        target:
+          type: string
+          description: |
+            Absolute container path to mount to.
+            The following paths are **blocked**: `/home/container`
+          example: /configs
+        read_only:
+          type: boolean
+          default: false
+        user_mountable:
+          type: boolean
+          default: false
+
+    UpdateMountRequest:
+      type: object
+      description: All fields optional.
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 64
+        description:
+          type: string
+          nullable: true
+          maxLength: 255
+        source:
+          type: string
+        target:
+          type: string
+        read_only:
+          type: boolean
+        user_mountable:
+          type: boolean
+
+    # =========================================================================
+    # ROLE SCHEMAS
+    # =========================================================================
+
+    Role:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Server Manager
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+
+    RoleItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: role
+        attributes:
+          $ref: '#/components/schemas/Role'
+        meta:
+          type: object
+          description: Only present on creation (201)
+          properties:
+            resource:
+              type: string
+
+    RoleCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/RoleItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'
+
+    CreateRoleRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: "Role display name. `Root Admin` is reserved."
+          example: Server Manager
+
+    # =========================================================================
+    # PLUGIN SCHEMAS
+    # =========================================================================
+
+    PluginMeta:
+      type: object
+      description: Runtime state and capability flags for the plugin
+      properties:
+        status:
+          type: string
+          description: Current lifecycle state
+          enum:
+            - NotInstalled
+            - Installing
+            - Installed
+            - Enabled
+            - Disabled
+            - UpdateAvailable
+            - Error
+          example: Installed
+        status_message:
+          type: string
+          nullable: true
+          description: Human-readable status detail (e.g. error message)
+          example: null
+        load_order:
+          type: integer
+          description: Plugin load priority
+          example: 0
+        is_compatible:
+          type: boolean
+          description: Whether the plugin is compatible with the current panel version
+          example: true
+        update_available:
+          type: boolean
+          example: false
+        can_enable:
+          type: boolean
+          description: Whether the plugin can currently be enabled
+          example: true
+        can_disable:
+          type: boolean
+          description: Whether the plugin can currently be disabled
+          example: false
+
+    Plugin:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Discord Notifier
+        author:
+          type: string
+          example: Pelican Community
+        version:
+          type: string
+          example: "1.2.0"
+        description:
+          type: string
+          example: Sends Discord notifications for server events
+        category:
+          type: string
+          example: notifications
+        url:
+          type: string
+          format: uri
+          example: https://github.com/example/discord-notifier
+        update_url:
+          type: string
+          format: uri
+          nullable: true
+          description: URL checked for plugin updates
+          example: null
+        namespace:
+          type: string
+          example: DiscordNotifier
+        class:
+          type: string
+          description: Fully-qualified plugin main class name
+          example: "DiscordNotifier\\DiscordNotifierPlugin"
+        panels:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: Panel versions this plugin supports
+          example: ["1.0.0", "1.1.0"]
+        panel_version:
+          type: string
+          description: Semver constraint for required panel version
+          example: ">=1.0.0"
+        composer_packages:
+          type: array
+          nullable: true
+          items: { type: object }
+          description: Composer packages required by this plugin
+        meta:
+          $ref: '#/components/schemas/PluginMeta'
+
+    PluginItem:
+      type: object
+      properties:
+        object:
+          type: string
+          example: plugin
+        attributes:
+          $ref: '#/components/schemas/Plugin'
+
+    PluginCollection:
+      type: object
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/PluginItem' }
+        meta:
+          type: object
+          properties:
+            pagination:
+              $ref: '#/components/schemas/Pagination'

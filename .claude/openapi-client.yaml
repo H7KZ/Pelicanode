@@ -1,0 +1,2929 @@
+openapi: 3.0.3
+info:
+  title: Pelican Panel Client API
+  description: |
+    The Client API provides access to servers and account management for panel users and subusers.
+
+    ## Authentication
+    All endpoints require a Bearer API key. Keys can be created under **Account → API Keys**.
+    ```
+    Authorization: Bearer <your-api-key>
+    ```
+
+    ## Response Format
+    All responses use the Fractal transformer format:
+
+    **Single resource:**
+    ```json
+    { "object": "<type>", "attributes": { ... } }
+    ```
+    **Collection:**
+    ```json
+    { "object": "list", "data": [...], "meta": { "pagination": { ... } } }
+    ```
+    **Unpaginated collection** (files, allocations, schedules, etc.):
+    ```json
+    { "object": "list", "data": [...] }
+    ```
+
+    ## Subuser Permissions
+    Server endpoints check subuser permissions. If the authenticated user is the server owner
+    they have all permissions. Subusers must have the specific permission granted.
+
+    Use `GET /api/client/permissions` to retrieve all available permission keys.
+
+    ## Includes
+    Some endpoints accept an `include` query parameter for eager-loading related resources (comma-separated).
+
+    ## Pagination
+    Paginated endpoints accept `page` (default: 1) and `per_page` query parameters.
+  version: 1.0.0
+  contact:
+    name: Pelican Panel
+    url: https://pelican.dev
+
+servers:
+  - url: /api/client
+    description: Client API
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Base
+    description: Server listing and system information
+  - name: Account
+    description: Authenticated user account management
+  - name: Account — API Keys
+    description: Personal API key management
+  - name: Account — SSH Keys
+    description: SSH public key management
+  - name: Account — Activity
+    description: Account-level activity logs
+  - name: Server
+    description: Server details, power, and console
+  - name: Server — Files
+    description: Server filesystem operations
+  - name: Server — Databases
+    description: Server database management
+  - name: Server — Schedules
+    description: Scheduled task management
+  - name: Server — Network
+    description: Allocation and network management
+  - name: Server — Subusers
+    description: Subuser (shared access) management
+  - name: Server — Backups
+    description: Backup management
+  - name: Server — Startup
+    description: Startup variables and Docker images
+  - name: Server — Settings
+    description: Server settings and reinstall
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # BASE
+  # ---------------------------------------------------------------------------
+
+  /:
+    get:
+      tags: [Base]
+      summary: List servers
+      description: |
+        Returns all servers the authenticated user has access to.
+
+        **`type` parameter:**
+        - *(omitted)* — all servers the user can access (owner + subuser)
+        - `owner` — only servers the user owns
+        - `admin` — servers the user can see as an admin but is not owner/subuser of (requires admin account)
+        - `admin-all` — every server on the panel (requires root admin account)
+      operationId: listServers
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+        - $ref: '#/components/parameters/Include'
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [admin, admin-all, owner]
+          description: Filter servers by access type (omit for all accessible servers)
+        - { name: "filter[uuid]", in: query, schema: { type: string } }
+        - { name: "filter[name]", in: query, schema: { type: string } }
+        - { name: "filter[description]", in: query, schema: { type: string } }
+        - { name: "filter[external_id]", in: query, schema: { type: string } }
+        - name: "filter[*]"
+          in: query
+          schema: { type: string }
+          description: Multi-field search across uuid, name, description, and external_id
+      responses:
+        '200':
+          description: Paginated list of servers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /permissions:
+    get:
+      tags: [Base]
+      summary: List subuser permissions
+      description: Returns all available subuser permission keys that can be assigned.
+      operationId: listPermissions
+      responses:
+        '200':
+          description: System permission list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object:
+                    type: string
+                    example: system_permissions
+                  attributes:
+                    type: object
+                    properties:
+                      permissions:
+                        type: array
+                        items: { type: string }
+                        example:
+                          - control.console
+                          - control.start
+                          - control.stop
+                          - control.restart
+                          - user.create
+                          - user.read
+                          - user.update
+                          - user.delete
+                          - file.create
+                          - file.read
+                          - file.update
+                          - file.delete
+                          - file.archive
+                          - startup.read
+                          - startup.update
+                          - startup.docker-image
+                          - database.create
+                          - database.read
+                          - database.update
+                          - database.delete
+                          - database.view_password
+                          - schedule.create
+                          - schedule.read
+                          - schedule.update
+                          - schedule.delete
+                          - allocation.read
+                          - allocation.create
+                          - allocation.update
+                          - allocation.delete
+                          - backup.create
+                          - backup.read
+                          - backup.delete
+                          - backup.download
+                          - backup.restore
+                          - settings.rename
+                          - settings.reinstall
+                          - settings.description
+                          - websocket.connect
+                          - activity.read
+
+  # ---------------------------------------------------------------------------
+  # ACCOUNT
+  # ---------------------------------------------------------------------------
+
+  /account:
+    get:
+      tags: [Account]
+      summary: Get account
+      description: Returns the authenticated user's account details.
+      operationId: getAccount
+      responses:
+        '200':
+          description: Account details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserItem' }
+
+  /account/username:
+    put:
+      tags: [Account]
+      summary: Update username
+      description: |
+        Updates the authenticated user's username. Requires current password confirmation.
+        Not available for externally-managed accounts.
+      operationId: updateUsername
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  example: newusername
+                password:
+                  type: string
+                  format: password
+                  description: Current account password for confirmation
+                  example: CurrentP@ss!
+      responses:
+        '204': { description: Username updated }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /account/email:
+    put:
+      tags: [Account]
+      summary: Update email
+      description: |
+        Updates the authenticated user's email address. Requires current password confirmation.
+        Not available for externally-managed accounts.
+      operationId: updateEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  minLength: 1
+                  maxLength: 255
+                  example: newemail@example.com
+                password:
+                  type: string
+                  format: password
+                  description: Current account password for confirmation
+                  example: CurrentP@ss!
+      responses:
+        '204': { description: Email updated }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /account/password:
+    put:
+      tags: [Account]
+      summary: Update password
+      description: |
+        Updates the authenticated user's password. All other active sessions are logged out immediately.
+        Not available for externally-managed accounts.
+      operationId: updatePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, password, password_confirmation]
+              properties:
+                current_password:
+                  type: string
+                  format: password
+                  description: Current password for verification
+                  example: OldP@ss!
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  description: New password
+                  example: NewSecureP@ss!
+                password_confirmation:
+                  type: string
+                  format: password
+                  description: New password confirmation (must match `password`)
+                  example: NewSecureP@ss!
+      responses:
+        '204': { description: Password updated; other sessions invalidated }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /account/activity:
+    get:
+      tags: [Account — Activity]
+      summary: List account activity
+      description: Returns a paginated set of the authenticated user's account-level activity logs.
+      operationId: listAccountActivity
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25, minimum: 1, maximum: 100 }
+        - { name: "filter[event]", in: query, schema: { type: string }, description: "Partial match on the event name" }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [timestamp, -timestamp] }
+      responses:
+        '200':
+          description: Paginated activity log
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityLogCollection' }
+
+  # ---------------------------------------------------------------------------
+  # ACCOUNT — API KEYS
+  # ---------------------------------------------------------------------------
+
+  /account/api-keys:
+    get:
+      tags: [Account — API Keys]
+      summary: List API keys
+      description: Returns all API keys for the authenticated user's account.
+      operationId: listApiKeys
+      responses:
+        '200':
+          description: List of API keys
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKeyCollection' }
+
+    post:
+      tags: [Account — API Keys]
+      summary: Create API key
+      description: Creates a new API key. The `secret_token` in the meta is only shown once on creation.
+      operationId: createApiKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description:
+                  type: string
+                  description: Human-readable label for this key
+                  example: My automation key
+                allowed_ips:
+                  type: array
+                  maxItems: 50
+                  items: { type: string }
+                  description: IP addresses or CIDR ranges allowed to use this key. Leave empty to allow all IPs.
+                  example: ["192.168.1.0/24", "10.0.0.1"]
+      responses:
+        '200':
+          description: API key created — the `secret_token` in meta is shown only once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKeyItemWithSecret' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /account/api-keys/{identifier}:
+    delete:
+      tags: [Account — API Keys]
+      summary: Delete API key
+      description: Permanently deletes an API key by its identifier.
+      operationId: deleteApiKey
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: The unique key identifier (short prefix, not the secret)
+          schema: { type: string }
+      responses:
+        '204': { description: API key deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # ACCOUNT — SSH KEYS
+  # ---------------------------------------------------------------------------
+
+  /account/ssh-keys:
+    get:
+      tags: [Account — SSH Keys]
+      summary: List SSH keys
+      description: Returns all SSH public keys on the authenticated user's account.
+      operationId: listSshKeys
+      responses:
+        '200':
+          description: List of SSH keys
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SshKeyCollection' }
+
+    post:
+      tags: [Account — SSH Keys]
+      summary: Add SSH key
+      description: |
+        Stores an SSH public key on the account. Supports RSA (≥ 2048 bits), Ed25519, and ECDSA.
+        DSA keys are rejected.
+      operationId: createSshKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, public_key]
+              properties:
+                name:
+                  type: string
+                  description: Friendly name for this key
+                  example: My MacBook
+                public_key:
+                  type: string
+                  description: SSH public key in OpenSSH or PEM format
+                  example: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG... user@host"
+      responses:
+        '200':
+          description: SSH key added
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SshKeyItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /account/ssh-keys/{fingerprint}:
+    delete:
+      tags: [Account — SSH Keys]
+      summary: Delete SSH key
+      description: Removes an SSH key from the account by its SHA-256 fingerprint.
+      operationId: deleteSshKey
+      parameters:
+        - name: fingerprint
+          in: path
+          required: true
+          description: SHA-256 fingerprint of the key (as returned by the list endpoint)
+          schema: { type: string }
+      responses:
+        '204': { description: SSH key removed }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — BASE
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+    get:
+      tags: [Server]
+      summary: Get server
+      description: |
+        Returns details about the specified server.
+        Always includes `allocations` and `variables` (startup variables).
+        Meta includes `is_server_owner` and `user_permissions`.
+      operationId: getServer
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: Server details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServerItemWithMeta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverUuid}/websocket:
+    get:
+      tags: [Server]
+      summary: Get websocket token
+      description: |
+        Generates a short-lived signed JWT (10 minutes) for connecting to the Wings daemon WebSocket.
+
+        Required permission: `websocket.connect`
+      operationId: getWebsocketToken
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      responses:
+        '200':
+          description: WebSocket connection details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token:
+                        type: string
+                        description: Signed JWT for WebSocket authentication
+                        example: eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...
+                      socket:
+                        type: string
+                        description: WebSocket URL (wss://)
+                        example: wss://node01.example.com/api/servers/abc-def/ws
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/resources:
+    get:
+      tags: [Server]
+      summary: Get resource utilization
+      description: |
+        Returns current resource usage (CPU, memory, disk, network, uptime) from the Wings daemon.
+        Results are cached for up to 20 seconds per server.
+      operationId: getServerResources
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      responses:
+        '200':
+          description: Current resource utilization
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatsItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/activity:
+    get:
+      tags: [Server]
+      summary: List server activity
+      description: |
+        Returns paginated activity logs for the server.
+
+        Required permission: `activity.read`
+      operationId: listServerActivity
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/Page'
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25, minimum: 1, maximum: 100 }
+        - { name: "filter[event]", in: query, schema: { type: string }, description: "Partial match on event name" }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [timestamp, -timestamp] }
+      responses:
+        '200':
+          description: Paginated server activity log
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityLogCollection' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/command:
+    post:
+      tags: [Server]
+      summary: Send command
+      description: |
+        Sends a console command to a running server.
+
+        Required permission: `control.console`
+
+        Returns `502 Bad Gateway` if the server is offline.
+      operationId: sendCommand
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command:
+                  type: string
+                  minLength: 1
+                  description: Console command to execute
+                  example: say Hello World
+      responses:
+        '204': { description: Command sent }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { description: Server is offline }
+
+  /servers/{serverUuid}/power:
+    post:
+      tags: [Server]
+      summary: Send power action
+      description: |
+        Sends a power signal to the server.
+
+        Required permission depends on signal:
+        - `start` → `control.start`
+        - `stop` / `kill` → `control.stop`
+        - `restart` → `control.restart`
+      operationId: sendPowerAction
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signal]
+              properties:
+                signal:
+                  type: string
+                  enum: [start, stop, restart, kill]
+                  description: Power signal to send
+                  example: start
+      responses:
+        '204': { description: Signal sent }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — DATABASES
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}/databases:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+    get:
+      tags: [Server — Databases]
+      summary: List databases
+      description: |
+        Returns all databases attached to this server.
+
+        Required permission: `database.read`
+      operationId: listServerDatabases
+      parameters:
+        - $ref: '#/components/parameters/Include'
+      responses:
+        '200':
+          description: List of databases
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDatabaseCollection' }
+
+    post:
+      tags: [Server — Databases]
+      summary: Create database
+      description: |
+        Creates a new database for this server.
+
+        Required permission: `database.create`
+
+        The response includes the password (only shown on creation).
+      operationId: createServerDatabase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [database, remote]
+              properties:
+                database:
+                  type: string
+                  pattern: '^[a-zA-Z0-9_\-]+$'
+                  minLength: 3
+                  maxLength: 48
+                  description: Database name suffix (panel prefixes with server ID)
+                  example: mydb
+                remote:
+                  type: string
+                  description: |
+                    Allowed connection host. Use `%` for any host.
+                    Supports IP addresses and wildcard patterns (e.g. `192.168.%.%`).
+                  example: "%"
+      responses:
+        '200':
+          description: Database created (includes password in response)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDatabaseItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverUuid}/databases/{databaseId}/rotate-password:
+    post:
+      tags: [Server — Databases]
+      summary: Rotate database password
+      description: |
+        Rotates the password for a database. Returns the updated database with the new password.
+
+        Required permission: `database.update`
+      operationId: rotateDatabasePassword
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/DatabaseId'
+      responses:
+        '200':
+          description: Updated database with new password
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDatabaseItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/databases/{databaseId}:
+    delete:
+      tags: [Server — Databases]
+      summary: Delete database
+      description: |
+        Permanently deletes a database from the server and the database host.
+
+        Required permission: `database.delete`
+      operationId: deleteServerDatabase
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/DatabaseId'
+      responses:
+        '204': { description: Database deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — FILES
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}/files/list:
+    get:
+      tags: [Server — Files]
+      summary: List directory
+      description: |
+        Returns the contents of a directory on the server.
+
+        Required permission: `file.read`
+      operationId: listDirectory
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - name: directory
+          in: query
+          schema: { type: string, nullable: true }
+          description: Directory path to list (defaults to `/`)
+          example: /logs
+      responses:
+        '200':
+          description: Directory listing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileObjectCollection' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/contents:
+    get:
+      tags: [Server — Files]
+      summary: Get file contents
+      description: |
+        Returns the raw text content of a file. Large files may be refused.
+
+        Required permission: `file.read`
+      operationId: getFileContents
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - name: file
+          in: query
+          required: true
+          schema: { type: string }
+          description: Path to the file
+          example: /server.properties
+      responses:
+        '200':
+          description: File contents as plain text
+          content:
+            text/plain:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /servers/{serverUuid}/files/download:
+    get:
+      tags: [Server — Files]
+      summary: Download file
+      description: |
+        Generates a short-lived signed URL (15 minutes) for downloading a file directly from Wings.
+
+        Required permission: `file.read`
+      operationId: downloadFile
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - name: file
+          in: query
+          required: true
+          schema: { type: string }
+          description: Path to the file
+          example: /world.zip
+      responses:
+        '200':
+          description: Signed download URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedUrlResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/upload:
+    get:
+      tags: [Server — Files]
+      summary: Get upload URL
+      description: |
+        Returns a signed URL (15 minutes) for uploading files directly to Wings via multipart form upload.
+
+        Required permission: `file.create`
+      operationId: getUploadUrl
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      responses:
+        '200':
+          description: Signed upload URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedUrlResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/write:
+    post:
+      tags: [Server — Files]
+      summary: Write file
+      description: |
+        Writes content to a file. The `file` path is passed as a query parameter and the raw request body is the file content.
+
+        Required permission: `file.create`
+      operationId: writeFile
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - name: file
+          in: query
+          required: true
+          schema: { type: string }
+          description: Path to the file to write/create
+          example: /config.json
+      requestBody:
+        required: true
+        description: Raw file content (any content type)
+        content:
+          text/plain:
+            schema: { type: string }
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '204': { description: File written }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/create-folder:
+    post:
+      tags: [Server — Files]
+      summary: Create directory
+      description: |
+        Creates a new folder on the server.
+
+        Required permission: `file.create`
+      operationId: createFolder
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                root:
+                  type: string
+                  nullable: true
+                  description: Parent directory (defaults to `/`)
+                  example: /config
+                name:
+                  type: string
+                  description: New folder name
+                  example: logs
+      responses:
+        '204': { description: Folder created }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/rename:
+    put:
+      tags: [Server — Files]
+      summary: Rename files
+      description: |
+        Renames one or more files. Each entry in `files` maps a `from` path to a `to` path.
+
+        Required permission: `file.update`
+      operationId: renameFiles
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, files]
+              properties:
+                root:
+                  type: string
+                  description: Root directory containing the files
+                  example: /plugins
+                files:
+                  type: array
+                  items:
+                    type: object
+                    required: [from, to]
+                    properties:
+                      from:
+                        type: string
+                        description: Original filename
+                        example: old-plugin.jar
+                      to:
+                        type: string
+                        description: New filename
+                        example: new-plugin.jar
+      responses:
+        '204': { description: File(s) renamed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/copy:
+    post:
+      tags: [Server — Files]
+      summary: Copy file
+      description: |
+        Creates a copy of the specified file at the same location with a suffix.
+
+        Required permission: `file.create`
+      operationId: copyFile
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location]
+              properties:
+                location:
+                  type: string
+                  description: Full path of the file to copy
+                  example: /plugins/my-plugin.jar
+      responses:
+        '204': { description: File copied }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/delete:
+    post:
+      tags: [Server — Files]
+      summary: Delete files
+      description: |
+        Deletes one or more files or directories.
+
+        Required permission: `file.delete`
+      operationId: deleteFiles
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, files]
+              properties:
+                root:
+                  type: string
+                  description: Root directory for the paths below
+                  example: /logs
+                files:
+                  type: array
+                  items: { type: string }
+                  description: File/directory names to delete
+                  example: [latest.log, debug.log]
+      responses:
+        '204': { description: File(s) deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/compress:
+    post:
+      tags: [Server — Files]
+      summary: Compress files
+      description: |
+        Compresses files into an archive.
+
+        Required permission: `file.archive`
+      operationId: compressFiles
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                root:
+                  type: string
+                  nullable: true
+                  description: Directory containing the files (defaults to `/`)
+                  example: /plugins
+                files:
+                  type: array
+                  items: { type: string }
+                  description: Files/directories to compress
+                  example: [plugin-a.jar, plugin-b.jar]
+                name:
+                  type: string
+                  nullable: true
+                  description: Archive filename (without extension; auto-generated if omitted)
+                  example: my-plugins
+                extension:
+                  type: string
+                  nullable: true
+                  enum: [zip, tgz, "tar.gz", txz, "tar.xz", tbz2, "tar.bz2"]
+                  description: Archive format (defaults to `tar.gz`)
+                  example: zip
+      responses:
+        '200':
+          description: Resulting archive file object
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileObjectItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/decompress:
+    post:
+      tags: [Server — Files]
+      summary: Decompress archive
+      description: |
+        Decompresses an archive file. May take up to 5 minutes.
+
+        Required permission: `file.create`
+      operationId: decompressFile
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                root:
+                  type: string
+                  nullable: true
+                  description: Directory to extract into (defaults to `/`)
+                  example: /plugins
+                file:
+                  type: string
+                  description: Archive filename to decompress
+                  example: plugins-backup.tar.gz
+      responses:
+        '204': { description: Archive decompressed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/chmod:
+    post:
+      tags: [Server — Files]
+      summary: Update file permissions
+      description: |
+        Changes UNIX permissions for one or more files.
+
+        Required permission: `file.update`
+      operationId: chmodFiles
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root, files]
+              properties:
+                root:
+                  type: string
+                  description: Root directory containing the files
+                  example: /
+                files:
+                  type: array
+                  items:
+                    type: object
+                    required: [file, mode]
+                    properties:
+                      file:
+                        type: string
+                        description: Filename
+                        example: start.sh
+                      mode:
+                        type: integer
+                        description: Octal mode as decimal (e.g. `755` means octal 755)
+                        example: 755
+      responses:
+        '204': { description: Permissions updated }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/files/pull:
+    post:
+      tags: [Server — Files]
+      summary: Pull remote file
+      description: |
+        Instructs Wings to download a file from a remote URL into the server's filesystem.
+
+        Required permission: `file.create`
+
+        Subject to `ResourceLimit::FilePull` middleware.
+      operationId: pullFile
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: URL to download the file from
+                  example: https://example.com/server.jar
+                directory:
+                  type: string
+                  nullable: true
+                  description: Target directory on the server (defaults to `/`)
+                  example: /plugins
+                filename:
+                  type: string
+                  nullable: true
+                  description: Override the downloaded filename (uses URL filename if omitted)
+                  example: my-plugin.jar
+                use_header:
+                  type: boolean
+                  description: Use the `Content-Disposition` header for the filename
+                  example: false
+                foreground:
+                  type: boolean
+                  description: Wait for the download to complete before responding
+                  example: false
+      responses:
+        '204': { description: Download initiated }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — SCHEDULES
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}/schedules:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+    get:
+      tags: [Server — Schedules]
+      summary: List schedules
+      description: |
+        Returns all schedules for the server with their tasks.
+
+        Required permission: `schedule.read`
+      operationId: listSchedules
+      responses:
+        '200':
+          description: List of schedules (each includes tasks)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleCollection' }
+
+    post:
+      tags: [Server — Schedules]
+      summary: Create schedule
+      description: |
+        Creates a new cron schedule for the server.
+
+        Required permission: `schedule.create`
+
+        Subject to `ResourceLimit::ScheduleCreate` middleware.
+      operationId: createSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleRequest' }
+      responses:
+        '200':
+          description: Created schedule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverUuid}/schedules/{scheduleId}:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+      - $ref: '#/components/parameters/ScheduleId'
+    get:
+      tags: [Server — Schedules]
+      summary: Get schedule
+      description: Returns a single schedule with its tasks.
+      operationId: getSchedule
+      responses:
+        '200':
+          description: Schedule details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    post:
+      tags: [Server — Schedules]
+      summary: Update schedule
+      description: |
+        Updates an existing schedule.
+
+        Required permission: `schedule.update`
+      operationId: updateSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleRequest' }
+      responses:
+        '200':
+          description: Updated schedule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+    delete:
+      tags: [Server — Schedules]
+      summary: Delete schedule
+      description: |
+        Deletes a schedule and all its associated tasks.
+
+        Required permission: `schedule.delete`
+      operationId: deleteSchedule
+      responses:
+        '204': { description: Schedule deleted }
+
+  /servers/{serverUuid}/schedules/{scheduleId}/execute:
+    post:
+      tags: [Server — Schedules]
+      summary: Execute schedule now
+      description: |
+        Triggers a schedule to execute immediately, regardless of its cron expression or active state.
+
+        Required permission: `schedule.update`
+      operationId: executeSchedule
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/ScheduleId'
+      responses:
+        '202': { description: Schedule execution queued }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/schedules/{scheduleId}/tasks:
+    post:
+      tags: [Server — Schedules]
+      summary: Create task
+      description: |
+        Adds a new task to a schedule. Maximum 10 tasks per schedule (configurable).
+
+        Required permission: `schedule.update`
+      operationId: createTask
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/ScheduleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskRequest' }
+      responses:
+        '200':
+          description: Created task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverUuid}/schedules/{scheduleId}/tasks/{taskId}:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+      - $ref: '#/components/parameters/ScheduleId'
+      - name: taskId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [Server — Schedules]
+      summary: Update task
+      description: |
+        Updates a task within a schedule.
+
+        Required permission: `schedule.update`
+      operationId: updateTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskRequest' }
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskItem' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+    delete:
+      tags: [Server — Schedules]
+      summary: Delete task
+      description: |
+        Deletes a task from a schedule. Subsequent tasks have their sequence IDs adjusted.
+
+        Required permission: `schedule.delete`
+      operationId: deleteTask
+      responses:
+        '204': { description: Task deleted }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — NETWORK
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}/network/allocations:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+    get:
+      tags: [Server — Network]
+      summary: List allocations
+      description: |
+        Returns all network allocations attached to this server.
+
+        Required permission: `allocation.read`
+      operationId: listAllocations
+      responses:
+        '200':
+          description: List of allocations
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientAllocationCollection' }
+
+    post:
+      tags: [Server — Network]
+      summary: Create allocation
+      description: |
+        Auto-assigns a new available allocation to the server.
+        Fails if the server has reached its allocation limit.
+
+        Required permission: `allocation.create`
+
+        Subject to `ResourceLimit::AllocationCreate` middleware.
+      operationId: createAllocation
+      responses:
+        '200':
+          description: Newly assigned allocation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientAllocationItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/network/allocations/{allocationId}:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+      - name: allocationId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [Server — Network]
+      summary: Update allocation notes
+      description: |
+        Updates the note/label for a specific allocation.
+
+        Required permission: `allocation.update`
+      operationId: updateAllocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notes]
+              properties:
+                notes:
+                  type: string
+                  nullable: true
+                  maxLength: 256
+                  description: Human-readable note for this allocation (send `null` to clear)
+                  example: Minecraft Java Edition
+      responses:
+        '200':
+          description: Updated allocation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientAllocationItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    delete:
+      tags: [Server — Network]
+      summary: Delete allocation
+      description: |
+        Removes an allocation from the server (sets it back to unassigned).
+        Only allowed if the server has an allocation limit set.
+
+        Required permission: `allocation.delete`
+      operationId: deleteAllocation
+      responses:
+        '204': { description: Allocation removed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/network/allocations/{allocationId}/primary:
+    post:
+      tags: [Server — Network]
+      summary: Set primary allocation
+      description: |
+        Makes the specified allocation the server's primary (default) allocation.
+
+        Required permission: `allocation.update`
+      operationId: setPrimaryAllocation
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - name: allocationId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Updated allocation (now primary)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientAllocationItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — SUBUSERS
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}/users:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+    get:
+      tags: [Server — Subusers]
+      summary: List subusers
+      description: |
+        Returns all subusers who have access to this server.
+
+        Required permission: `user.read`
+      operationId: listSubusers
+      responses:
+        '200':
+          description: List of subusers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubuserCollection' }
+
+    post:
+      tags: [Server — Subusers]
+      summary: Create subuser
+      description: |
+        Adds a user as a subuser of the server. The user must already have a panel account.
+
+        Required permission: `user.create`
+
+        Subject to `ResourceLimit::SubuserCreate` middleware.
+
+        Note: `websocket.connect` is always added to the permissions list automatically.
+      operationId: createSubuser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, permissions]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+                  description: Email address of the user to add
+                  example: friend@example.com
+                permissions:
+                  type: array
+                  items: { type: string }
+                  description: Permission keys to grant (see `GET /permissions` for all keys)
+                  example: [control.start, control.stop, file.read]
+      responses:
+        '200':
+          description: Created subuser
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubuserItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverUuid}/users/{userUuid}:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+      - name: userUuid
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Server — Subusers]
+      summary: Get subuser
+      description: |
+        Returns a single subuser.
+
+        Required permission: `user.read`
+      operationId: getSubuser
+      responses:
+        '200':
+          description: Subuser details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubuserItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    post:
+      tags: [Server — Subusers]
+      summary: Update subuser
+      description: |
+        Updates the permissions for a subuser.
+
+        Required permission: `user.update`
+      operationId: updateSubuser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permissions]
+              properties:
+                permissions:
+                  type: array
+                  items: { type: string }
+                  description: New set of permissions to grant
+                  example: [control.start, control.stop, file.read, file.write]
+      responses:
+        '200':
+          description: Updated subuser
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubuserItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    delete:
+      tags: [Server — Subusers]
+      summary: Delete subuser
+      description: |
+        Removes a user's subuser access to this server.
+
+        Required permission: `user.delete`
+      operationId: deleteSubuser
+      responses:
+        '204': { description: Subuser removed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — BACKUPS
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}/backups:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+    get:
+      tags: [Server — Backups]
+      summary: List backups
+      description: |
+        Returns a paginated list of backups for the server.
+
+        Required permission: `backup.read`
+
+        Meta includes `backup_count` (number of non-failed backups).
+      operationId: listBackups
+      parameters:
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+      responses:
+        '200':
+          description: Paginated backup list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupCollection' }
+
+    post:
+      tags: [Server — Backups]
+      summary: Create backup
+      description: |
+        Initiates a new backup for the server.
+
+        Required permission: `backup.create`
+      operationId: createBackup
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  nullable: true
+                  maxLength: 255
+                  description: Backup name (auto-generated if omitted)
+                  example: Before update 1.21
+                is_locked:
+                  type: boolean
+                  nullable: true
+                  default: false
+                  description: Lock the backup (prevents deletion; requires `backup.delete` permission)
+                ignored:
+                  type: string
+                  nullable: true
+                  description: Newline-separated list of files/directories to exclude
+                  example: "logs/\ncache/"
+      responses:
+        '200':
+          description: Backup initiated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/backups/{backupUuid}:
+    parameters:
+      - $ref: '#/components/parameters/ServerUuid'
+      - $ref: '#/components/parameters/BackupUuid'
+    get:
+      tags: [Server — Backups]
+      summary: Get backup
+      description: |
+        Returns details about a single backup.
+
+        Required permission: `backup.read`
+      operationId: getBackup
+      responses:
+        '200':
+          description: Backup details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    delete:
+      tags: [Server — Backups]
+      summary: Delete backup
+      description: |
+        Permanently deletes a backup from both the panel and remote storage.
+        Locked backups cannot be deleted.
+
+        Required permission: `backup.delete`
+      operationId: deleteBackup
+      responses:
+        '204': { description: Backup deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/backups/{backupUuid}/download:
+    get:
+      tags: [Server — Backups]
+      summary: Download backup
+      description: |
+        Returns a signed URL for downloading the backup directly from storage.
+
+        Required permission: `backup.download`
+      operationId: downloadBackup
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/BackupUuid'
+      responses:
+        '200':
+          description: Signed download URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignedUrlResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/backups/{backupUuid}/rename:
+    put:
+      tags: [Server — Backups]
+      summary: Rename backup
+      description: |
+        Updates the display name of a backup.
+
+        Required permission: `backup.delete` (same permission as other backup modification actions)
+      operationId: renameBackup
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/BackupUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                  example: Pre-update snapshot
+      responses:
+        '200':
+          description: Updated backup
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/backups/{backupUuid}/lock:
+    post:
+      tags: [Server — Backups]
+      summary: Toggle backup lock
+      description: |
+        Toggles the locked state of a backup. Locked backups cannot be deleted.
+
+        Required permission: `backup.delete`
+      operationId: toggleBackupLock
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/BackupUuid'
+      responses:
+        '200':
+          description: Updated backup with new lock state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupItem' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/backups/{backupUuid}/restore:
+    post:
+      tags: [Server — Backups]
+      summary: Restore backup
+      description: |
+        Restores a backup to the server. The server must have no active status (fully running).
+        Only completed, successful backups can be restored.
+
+        If `truncate` is true, all existing server files will be deleted before extraction.
+
+        Required permission: `backup.restore`
+
+        Subject to `ResourceLimit::BackupRestore` middleware.
+      operationId: restoreBackup
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+        - $ref: '#/components/parameters/BackupUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [truncate]
+              properties:
+                truncate:
+                  type: boolean
+                  description: Delete all existing files before restoring
+                  example: false
+      responses:
+        '204': { description: Restore initiated }
+        '400': { description: Server not in a restoreable state or backup not completed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — STARTUP
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}/startup:
+    get:
+      tags: [Server — Startup]
+      summary: List startup variables
+      description: |
+        Returns all user-viewable startup environment variables for the server, along with
+        the resolved startup command and available Docker images.
+
+        Required permission: `startup.read`
+      operationId: listStartupVariables
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      responses:
+        '200':
+          description: Startup variable collection with meta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EggVariableCollection' }
+
+  /servers/{serverUuid}/startup/variable:
+    put:
+      tags: [Server — Startup]
+      summary: Update startup variable
+      description: |
+        Updates a single environment variable for the server.
+        The variable must be user-viewable and user-editable.
+        Additional variable-specific validation rules are applied server-side.
+
+        Required permission: `startup.update`
+      operationId: updateStartupVariable
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key:
+                  type: string
+                  description: Environment variable name (e.g. `SERVER_JARFILE`)
+                  example: SERVER_JARFILE
+                value:
+                  description: New value for the variable (must satisfy the variable's validation rules)
+                  example: server.jar
+      responses:
+        '200':
+          description: Updated variable with refreshed startup command in meta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EggVariableItemWithMeta' }
+        '400': { description: Variable not found or not editable }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ---------------------------------------------------------------------------
+  # SERVER — SETTINGS
+  # ---------------------------------------------------------------------------
+
+  /servers/{serverUuid}/settings/rename:
+    post:
+      tags: [Server — Settings]
+      summary: Rename server
+      description: |
+        Changes the server's display name.
+
+        Required permission: `settings.rename`
+      operationId: renameServer
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                  example: My Awesome Server
+      responses:
+        '204': { description: Server renamed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /servers/{serverUuid}/settings/description:
+    post:
+      tags: [Server — Settings]
+      summary: Update description
+      description: |
+        Updates the server's description. Only available when `panel.editable_server_descriptions` is enabled.
+
+        Required permission: `settings.description`
+      operationId: updateServerDescription
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                  nullable: true
+                  description: New description (send `null` to clear)
+                  example: A fun survival server
+      responses:
+        '204': { description: Description updated }
+        '403': { description: Feature disabled or insufficient permission }
+
+  /servers/{serverUuid}/settings/reinstall:
+    post:
+      tags: [Server — Settings]
+      summary: Reinstall server
+      description: |
+        Triggers the server's install script to run again. This will not delete files unless
+        the install script does so.
+
+        Required permission: `settings.reinstall`
+      operationId: reinstallServer
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      responses:
+        '202': { description: Reinstall initiated }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /servers/{serverUuid}/settings/docker-image:
+    put:
+      tags: [Server — Settings]
+      summary: Change Docker image
+      description: |
+        Changes the Docker image used by the server. Only images listed in the egg's
+        `docker_images` are allowed. Fails if an administrator has manually set a custom image.
+
+        Required permission: `startup.docker-image`
+      operationId: setDockerImage
+      parameters:
+        - $ref: '#/components/parameters/ServerUuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [docker_image]
+              properties:
+                docker_image:
+                  type: string
+                  description: Docker image tag (must be one of the egg's defined images)
+                  example: "ghcr.io/pterodactyl/yolks:java_21"
+      responses:
+        '204': { description: Docker image updated }
+        '400': { description: Image is not in the allowed list or was set manually by an admin }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Client API key. Generate under Account → API Keys in the panel.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: Page number
+      schema: { type: integer, minimum: 1, default: 1 }
+
+    Include:
+      name: include
+      in: query
+      description: Comma-separated related resources to eager-load
+      schema: { type: string }
+
+    ServerUuid:
+      name: serverUuid
+      in: path
+      required: true
+      description: Server UUID (full UUID, not short identifier)
+      schema: { type: string, format: uuid }
+
+    ScheduleId:
+      name: scheduleId
+      in: path
+      required: true
+      schema: { type: integer }
+
+    DatabaseId:
+      name: databaseId
+      in: path
+      required: true
+      description: Database identifier (ID or name slug as returned by the list endpoint)
+      schema: { type: string }
+
+    BackupUuid:
+      name: backupUuid
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    Forbidden:
+      description: Insufficient subuser permissions
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationErrorResponse' }
+
+  schemas:
+
+    # =========================================================================
+    # ERROR SCHEMAS
+    # =========================================================================
+
+    ErrorDetail:
+      type: object
+      properties:
+        code: { type: string, example: HttpForbiddenException }
+        status: { type: string, example: "403" }
+        detail: { type: string, example: You do not have permission to perform this action. }
+
+    ErrorResponse:
+      type: object
+      properties:
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ErrorDetail' }
+
+    ValidationErrorDetail:
+      type: object
+      properties:
+        code: { type: string, example: ValidationException }
+        status: { type: string, example: "422" }
+        detail: { type: string, example: The name field is required. }
+        source:
+          type: object
+          properties:
+            field: { type: string, example: name }
+        meta: { type: object }
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ValidationErrorDetail' }
+
+    # =========================================================================
+    # PAGINATION
+    # =========================================================================
+
+    PaginationLinks:
+      type: object
+      properties:
+        previous: { type: string, nullable: true }
+        next: { type: string, nullable: true }
+
+    Pagination:
+      type: object
+      properties:
+        total: { type: integer, example: 100 }
+        count: { type: integer, example: 25 }
+        per_page: { type: integer, example: 25 }
+        current_page: { type: integer, example: 1 }
+        total_pages: { type: integer, example: 4 }
+        links: { $ref: '#/components/schemas/PaginationLinks' }
+
+    # =========================================================================
+    # MISC
+    # =========================================================================
+
+    SignedUrlResponse:
+      type: object
+      properties:
+        object:
+          type: string
+          example: signed_url
+        attributes:
+          type: object
+          properties:
+            url:
+              type: string
+              format: uri
+              description: Time-limited signed URL
+              example: "https://node01.example.com/download/file?token=eyJ..."
+
+    # =========================================================================
+    # USER / ACCOUNT
+    # =========================================================================
+
+    User:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        username:
+          type: string
+          example: jsmith
+        email:
+          type: string
+          format: email
+          example: jsmith@example.com
+        language:
+          type: string
+          example: en
+        image:
+          type: string
+          format: uri
+          deprecated: true
+          description: Gravatar URL (deprecated)
+          example: https://gravatar.com/avatar/abc123
+        admin:
+          type: boolean
+          deprecated: true
+          description: "Deprecated — use `root_admin`"
+        root_admin:
+          type: boolean
+          example: false
+        2fa_enabled:
+          type: boolean
+          description: Whether the user has an authenticator app configured
+          example: false
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+
+    UserItem:
+      type: object
+      properties:
+        object: { type: string, example: user }
+        attributes: { $ref: '#/components/schemas/User' }
+
+    # =========================================================================
+    # API KEYS
+    # =========================================================================
+
+    ApiKey:
+      type: object
+      properties:
+        identifier:
+          type: string
+          description: Short key identifier (public prefix)
+          example: pnl_abc123
+        description:
+          type: string
+          description: Human-readable key label
+          example: My automation key
+        allowed_ips:
+          type: array
+          items: { type: string }
+          description: IP/CIDR restrictions (empty = unrestricted)
+          example: ["192.168.1.0/24"]
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2024-06-01T12:00:00+00:00"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+
+    ApiKeyItem:
+      type: object
+      properties:
+        object: { type: string, example: api_key }
+        attributes: { $ref: '#/components/schemas/ApiKey' }
+
+    ApiKeyItemWithSecret:
+      allOf:
+        - $ref: '#/components/schemas/ApiKeyItem'
+      properties:
+        meta:
+          type: object
+          properties:
+            secret_token:
+              type: string
+              description: Full API key — only returned once on creation
+              example: "pnl_abc123XXXXXXXXXXXXXXXXXXXXX"
+
+    ApiKeyCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ApiKeyItem' }
+
+    # =========================================================================
+    # SSH KEYS
+    # =========================================================================
+
+    SshKey:
+      type: object
+      properties:
+        name:
+          type: string
+          example: My MacBook
+        fingerprint:
+          type: string
+          description: SHA-256 fingerprint of the public key
+          example: "SHA256:abc123def456..."
+        public_key:
+          type: string
+          description: Public key in PKCS8 format
+          example: "-----BEGIN PUBLIC KEY-----\n..."
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00+00:00"
+
+    SshKeyItem:
+      type: object
+      properties:
+        object: { type: string, example: ssh_key }
+        attributes: { $ref: '#/components/schemas/SshKey' }
+
+    SshKeyCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/SshKeyItem' }
+
+    # =========================================================================
+    # ACTIVITY LOGS
+    # =========================================================================
+
+    ActivityLog:
+      type: object
+      properties:
+        id:
+          type: string
+          description: SHA1 hash used as a stable rendering key (not a database ID)
+          example: da39a3ee5e6b4b0d3255bfef95601890afd80709
+        event:
+          type: string
+          description: Dot-namespaced event identifier
+          example: user:account.email-changed
+        is_api:
+          type: boolean
+          description: Whether the action was performed via the API (vs. the web UI)
+          example: true
+        ip:
+          type: string
+          nullable: true
+          description: IP address of the actor (null if hidden due to permissions)
+          example: "192.168.1.100"
+        description:
+          type: string
+          nullable: true
+          description: Human-readable description of the event
+        properties:
+          type: object
+          description: Event-specific metadata
+          additionalProperties: {}
+        has_additional_metadata:
+          type: boolean
+          description: Whether there is additional metadata beyond the properties field
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-06-01T12:00:00+00:00"
+
+    ActivityLogItem:
+      type: object
+      properties:
+        object: { type: string, example: activity_log }
+        attributes: { $ref: '#/components/schemas/ActivityLog' }
+
+    ActivityLogCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ActivityLogItem' }
+        meta:
+          type: object
+          properties:
+            pagination: { $ref: '#/components/schemas/Pagination' }
+
+    # =========================================================================
+    # SERVER
+    # =========================================================================
+
+    ServerSftpDetails:
+      type: object
+      properties:
+        ip:
+          type: string
+          description: SFTP hostname (node FQDN)
+          example: node01.example.com
+        alias:
+          type: string
+          nullable: true
+          description: SFTP hostname alias (if configured)
+          example: sftp.example.com
+        port:
+          type: integer
+          example: 2022
+
+    ServerLimits:
+      type: object
+      properties:
+        memory: { type: integer, description: Memory limit in MB, example: 1024 }
+        swap: { type: integer, description: "Swap limit in MB (-1 = unlimited)", example: 0 }
+        disk: { type: integer, description: Disk limit in MB, example: 10240 }
+        io: { type: integer, description: Block I/O weight (0–1000), example: 500 }
+        cpu: { type: integer, description: CPU limit percentage, example: 100 }
+        threads: { type: string, nullable: true, description: CPU core pinning expression, example: null }
+        oom_disabled: { type: boolean, deprecated: true, description: "Deprecated — use oom_killer" }
+        oom_killer: { type: boolean, description: Whether the OOM killer is enabled, example: false }
+
+    ServerFeatureLimits:
+      type: object
+      properties:
+        databases: { type: integer, nullable: true, example: 5 }
+        allocations: { type: integer, nullable: true, example: 5 }
+        backups: { type: integer, nullable: true, example: 10 }
+
+    Server:
+      type: object
+      properties:
+        server_owner:
+          type: boolean
+          description: Whether the authenticated user owns this server
+          example: true
+        identifier:
+          type: string
+          description: Short 8-character UUID (uuid_short)
+          example: a1b2c3d4
+        internal_id:
+          type: integer
+          description: Internal database ID
+          example: 1
+        uuid:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        name:
+          type: string
+          example: My Minecraft Server
+        node:
+          type: string
+          description: Node display name
+          example: US-East-01
+        is_node_under_maintenance:
+          type: boolean
+          description: Whether the node hosting this server is in maintenance mode
+          example: false
+        sftp_details:
+          $ref: '#/components/schemas/ServerSftpDetails'
+        description:
+          type: string
+          description: Server description (only present if `panel.editable_server_descriptions` is enabled)
+          example: Survival SMP
+        limits:
+          $ref: '#/components/schemas/ServerLimits'
+        invocation:
+          type: string
+          description: Resolved startup command (variable values hidden if user lacks startup.read)
+          example: "java -Xms128M -Xmx1024M -jar server.jar"
+        docker_image:
+          type: string
+          description: Current Docker image
+          example: "ghcr.io/pterodactyl/yolks:java_17"
+        egg_features:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: Feature flags from the egg (e.g. eula)
+          example: [eula]
+        feature_limits:
+          $ref: '#/components/schemas/ServerFeatureLimits'
+        status:
+          type: string
+          nullable: true
+          enum:
+            - installing
+            - running
+            - suspended
+            - stopping
+            - stopped
+            - install_failed
+            - reinstall_failed
+            - restoring_backup
+            - transferring
+          description: "`null` = fully operational"
+          example: null
+        is_suspended:
+          type: boolean
+          deprecated: true
+          description: "Deprecated — check `status == 'suspended'`"
+        is_installing:
+          type: boolean
+          deprecated: true
+          description: "Deprecated — check `status == 'installing'`"
+        is_transferring:
+          type: boolean
+          description: Whether the server is currently being transferred to another node
+
+    ServerItem:
+      type: object
+      properties:
+        object: { type: string, example: server }
+        attributes: { $ref: '#/components/schemas/Server' }
+
+    ServerItemWithMeta:
+      allOf:
+        - $ref: '#/components/schemas/ServerItem'
+      properties:
+        meta:
+          type: object
+          properties:
+            is_server_owner:
+              type: boolean
+              description: Whether the authenticated user is the server owner
+              example: true
+            user_permissions:
+              type: array
+              items: { type: string }
+              description: All permissions the current user has on this server
+              example: [control.start, control.stop, file.read]
+
+    ServerCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ServerItem' }
+        meta:
+          type: object
+          properties:
+            pagination: { $ref: '#/components/schemas/Pagination' }
+
+    # =========================================================================
+    # RESOURCE STATS
+    # =========================================================================
+
+    ServerResources:
+      type: object
+      properties:
+        memory_bytes: { type: integer, description: Memory in bytes, example: 536870912 }
+        cpu_absolute: { type: number, format: float, description: CPU usage percentage, example: 23.5 }
+        disk_bytes: { type: integer, description: Disk usage in bytes, example: 1073741824 }
+        network_rx_bytes: { type: integer, description: Incoming network bytes, example: 1048576 }
+        network_tx_bytes: { type: integer, description: Outgoing network bytes, example: 524288 }
+        uptime: { type: integer, description: Server uptime in milliseconds, example: 3600000 }
+
+    Stats:
+      type: object
+      properties:
+        current_state:
+          type: string
+          description: Current server process state from Wings
+          enum: [running, stopped, starting, stopping, offline]
+          example: running
+        is_suspended:
+          type: boolean
+          example: false
+        resources:
+          $ref: '#/components/schemas/ServerResources'
+
+    StatsItem:
+      type: object
+      properties:
+        object: { type: string, example: stats }
+        attributes: { $ref: '#/components/schemas/Stats' }
+
+    # =========================================================================
+    # CLIENT DATABASE
+    # =========================================================================
+
+    ClientDatabaseHost:
+      type: object
+      properties:
+        address: { type: string, example: "127.0.0.1" }
+        port: { type: integer, example: 3306 }
+
+    ClientDatabase:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        host:
+          $ref: '#/components/schemas/ClientDatabaseHost'
+        name:
+          type: string
+          description: Full database name (panel-prefixed)
+          example: s1_mydb
+        username:
+          type: string
+          description: Database username (panel-prefixed)
+          example: u1_mydb
+        connections_from:
+          type: string
+          description: Allowed connection host pattern
+          example: "%"
+        max_connections:
+          type: integer
+          nullable: true
+          description: Max simultaneous connections (null = unlimited)
+          example: null
+
+    ClientDatabaseItem:
+      type: object
+      properties:
+        object: { type: string, example: server_database }
+        attributes: { $ref: '#/components/schemas/ClientDatabase' }
+        relationships:
+          type: object
+          description: Included when password is requested (on create / rotate-password)
+          properties:
+            password:
+              type: object
+              properties:
+                object: { type: string, example: database_password }
+                attributes:
+                  type: object
+                  properties:
+                    password: { type: string, description: Plaintext database password }
+
+    ClientDatabaseCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ClientDatabaseItem' }
+
+    # =========================================================================
+    # FILE OBJECTS
+    # =========================================================================
+
+    FileObject:
+      type: object
+      properties:
+        name: { type: string, description: Filename, example: server.jar }
+        mode:
+          type: string
+          description: Human-readable UNIX mode string
+          example: "-rwxr-xr-x"
+        mode_bits:
+          description: Numeric mode bits
+          example: 493
+        size: { type: integer, description: File size in bytes, example: 52428800 }
+        is_file: { type: boolean, description: Whether this entry is a file (false = directory), example: true }
+        is_symlink: { type: boolean, description: Whether this is a symbolic link, example: false }
+        mimetype: { type: string, description: MIME type, example: application/java-archive }
+        created_at: { type: string, format: date-time }
+        modified_at: { type: string, format: date-time }
+
+    FileObjectItem:
+      type: object
+      properties:
+        object: { type: string, example: file_object }
+        attributes: { $ref: '#/components/schemas/FileObject' }
+
+    FileObjectCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/FileObjectItem' }
+
+    # =========================================================================
+    # SCHEDULES & TASKS
+    # =========================================================================
+
+    ScheduleCron:
+      type: object
+      properties:
+        day_of_week: { type: string, example: "*" }
+        day_of_month: { type: string, example: "*" }
+        month: { type: string, example: "*" }
+        hour: { type: string, example: "0" }
+        minute: { type: string, example: "*/5" }
+
+    Schedule:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        name: { type: string, example: Auto backup }
+        cron: { $ref: '#/components/schemas/ScheduleCron' }
+        is_active: { type: boolean, example: true }
+        is_processing: { type: boolean, description: Whether the schedule is currently running, example: false }
+        only_when_online: { type: boolean, description: Only run if the server is running, example: true }
+        last_run_at: { type: string, format: date-time, nullable: true }
+        next_run_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ScheduleItem:
+      type: object
+      properties:
+        object: { type: string, example: schedule }
+        attributes:
+          allOf:
+            - $ref: '#/components/schemas/Schedule'
+          properties:
+            relationships:
+              type: object
+              description: Always included (defaultIncludes tasks)
+              properties:
+                tasks:
+                  type: object
+                  properties:
+                    object: { type: string, example: list }
+                    data:
+                      type: array
+                      items: { $ref: '#/components/schemas/TaskItem' }
+
+    ScheduleCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ScheduleItem' }
+
+    ScheduleRequest:
+      type: object
+      required: [name, minute, hour, day_of_month, month, day_of_week]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Auto Backup
+        is_active:
+          type: boolean
+          example: true
+        only_when_online:
+          type: boolean
+          default: false
+          description: Only execute if the server is running
+          example: true
+        minute:
+          type: string
+          description: Cron minute expression
+          example: "0"
+        hour:
+          type: string
+          description: Cron hour expression
+          example: "*/6"
+        day_of_month:
+          type: string
+          description: Cron day-of-month expression
+          example: "*"
+        month:
+          type: string
+          description: Cron month expression
+          example: "*"
+        day_of_week:
+          type: string
+          description: Cron day-of-week expression
+          example: "*"
+
+    Task:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        sequence_id: { type: integer, description: Execution order within the schedule, example: 1 }
+        action:
+          type: string
+          enum: [command, power, backup, delete_files]
+          example: backup
+        payload:
+          type: string
+          description: Action-specific payload (command text, power signal, blank for backup)
+          example: ""
+        time_offset:
+          type: integer
+          description: Seconds to wait after the previous task before running this one (0–900)
+          example: 0
+        is_queued:
+          type: boolean
+          description: Whether this task is currently queued for execution
+          example: false
+        continue_on_failure:
+          type: boolean
+          description: Whether to continue to the next task if this one fails
+          example: false
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    TaskItem:
+      type: object
+      properties:
+        object: { type: string, example: schedule_task }
+        attributes: { $ref: '#/components/schemas/Task' }
+
+    TaskRequest:
+      type: object
+      required: [action, time_offset]
+      properties:
+        action:
+          type: string
+          enum: [command, power, backup, delete_files]
+          example: command
+        payload:
+          type: string
+          nullable: true
+          description: |
+            Required unless action is `backup`.
+            - `command` → console command string
+            - `power` → one of `start`, `stop`, `restart`, `kill`
+            - `delete_files` → JSON array of file paths
+            - `backup` → leave empty
+          example: say Restarting in 5 minutes!
+        time_offset:
+          type: integer
+          minimum: 0
+          maximum: 900
+          description: Seconds to wait after the previous task (0–900)
+          example: 0
+        sequence_id:
+          type: integer
+          minimum: 1
+          description: Position in the execution order (auto-assigned if omitted)
+          example: 1
+        continue_on_failure:
+          type: boolean
+          description: Continue executing subsequent tasks even if this task fails
+          example: false
+
+    # =========================================================================
+    # ALLOCATIONS (client view)
+    # =========================================================================
+
+    ClientAllocation:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        ip: { type: string, example: "192.168.1.100" }
+        ip_alias: { type: string, nullable: true, example: null }
+        port: { type: integer, minimum: 1024, maximum: 65535, example: 25565 }
+        notes: { type: string, nullable: true, maxLength: 256, example: "Minecraft Java Edition" }
+        is_default: { type: boolean, description: Whether this is the server's primary allocation, example: true }
+
+    ClientAllocationItem:
+      type: object
+      properties:
+        object: { type: string, example: allocation }
+        attributes: { $ref: '#/components/schemas/ClientAllocation' }
+
+    ClientAllocationCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ClientAllocationItem' }
+
+    # =========================================================================
+    # SUBUSERS
+    # =========================================================================
+
+    Subuser:
+      type: object
+      description: A subuser is a User record merged with their permission list for this server
+      properties:
+        uuid: { type: string, format: uuid }
+        username: { type: string, example: friend }
+        email: { type: string, format: email, example: friend@example.com }
+        language: { type: string, example: en }
+        image:
+          type: string
+          format: uri
+          deprecated: true
+          description: Gravatar URL (deprecated)
+        admin: { type: boolean, deprecated: true }
+        root_admin: { type: boolean }
+        2fa_enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        permissions:
+          type: array
+          items: { type: string }
+          description: Permissions granted to this subuser for this server
+          example: [control.start, control.stop, file.read]
+
+    SubuserItem:
+      type: object
+      properties:
+        object: { type: string, example: server_subuser }
+        attributes: { $ref: '#/components/schemas/Subuser' }
+
+    SubuserCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/SubuserItem' }
+
+    # =========================================================================
+    # BACKUPS
+    # =========================================================================
+
+    Backup:
+      type: object
+      properties:
+        uuid: { type: string, format: uuid, example: b1c2d3e4-f5a6-7890-bcde-f12345678901 }
+        is_successful: { type: boolean, description: Whether the backup completed successfully, example: true }
+        is_locked: { type: boolean, description: Whether the backup is locked (cannot be deleted), example: false }
+        name: { type: string, example: "Before update 1.21" }
+        ignored_files:
+          type: array
+          items: { type: string }
+          description: Files/directories excluded from this backup
+          example: ["logs/", "cache/"]
+        checksum:
+          type: string
+          nullable: true
+          description: SHA-256 checksum of the archive (available after completion)
+          example: sha1:abc123def456...
+        bytes:
+          type: integer
+          description: Archive size in bytes (0 until completed)
+          example: 52428800
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, nullable: true }
+
+    BackupItem:
+      type: object
+      properties:
+        object: { type: string, example: backup }
+        attributes: { $ref: '#/components/schemas/Backup' }
+
+    BackupCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/BackupItem' }
+        meta:
+          type: object
+          properties:
+            backup_count:
+              type: integer
+              description: Total number of non-failed backups for this server
+              example: 3
+            pagination: { $ref: '#/components/schemas/Pagination' }
+
+    # =========================================================================
+    # EGG VARIABLES (startup)
+    # =========================================================================
+
+    EggVariable:
+      type: object
+      description: A user-viewable environment variable for the server's startup configuration
+      properties:
+        name: { type: string, description: Display name, example: "Server Jar File" }
+        description: { type: string, example: "The name of the server jar to use." }
+        env_variable: { type: string, description: Environment variable key, example: SERVER_JARFILE }
+        default_value: { type: string, example: server.jar }
+        server_value: { type: string, nullable: true, description: Current value for this server, example: paper.jar }
+        is_editable: { type: boolean, description: Whether the user can change this value, example: true }
+        rules:
+          type: string
+          description: Pipe-separated Laravel validation rules applied to the value
+          example: "required|string|max:20"
+
+    EggVariableItem:
+      type: object
+      properties:
+        object: { type: string, example: egg_variable }
+        attributes: { $ref: '#/components/schemas/EggVariable' }
+
+    EggVariableItemWithMeta:
+      allOf:
+        - $ref: '#/components/schemas/EggVariableItem'
+      properties:
+        meta:
+          type: object
+          properties:
+            startup_command:
+              type: string
+              description: Resolved startup command after the variable update
+              example: "java -Xms128M -Xmx1024M -jar paper.jar"
+            raw_startup_command:
+              type: string
+              description: Raw startup command template with variable placeholders
+              example: "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}"
+
+    EggVariableCollection:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/EggVariableItem' }
+        meta:
+          type: object
+          properties:
+            startup_command:
+              type: string
+              description: Resolved startup command with current variable values
+              example: "java -Xms128M -Xmx1024M -jar server.jar"
+            docker_images:
+              type: object
+              additionalProperties: { type: string }
+              description: Available Docker images for this egg (display name → image tag)
+              example:
+                "Java 17": "ghcr.io/pterodactyl/yolks:java_17"
+                "Java 21": "ghcr.io/pterodactyl/yolks:java_21"
+            raw_startup_command:
+              type: string
+              description: Raw startup command with unresolved variable placeholders
+              example: "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}"
