@@ -43,7 +43,7 @@ export default tseslint.config(
 			ecmaVersion: 'latest',
 			sourceType: 'module',
 			globals: {
-				...globals.browser,
+				...globals.node,
 				...globals.es2021
 			},
 			parserOptions: {
@@ -53,16 +53,23 @@ export default tseslint.config(
 		},
 		rules: {
 			'@typescript-eslint/naming-convention': 'off',
-			'@typescript-eslint/no-explicit-any': 'off',
+			// Legitimately suppressed for API wrapper code using explicit `as` casts on JSON
 			'@typescript-eslint/restrict-template-expressions': 'off',
 			'@typescript-eslint/restrict-plus-operands': 'off',
 			'@typescript-eslint/strict-boolean-expressions': 'off',
 			'@typescript-eslint/no-misused-promises': 'off',
-			'@typescript-eslint/consistent-type-assertions': 'off',
-			'@typescript-eslint/no-floating-promises': 'off',
-			'@typescript-eslint/no-extraneous-class': 'off',
-			'@typescript-eslint/no-confusing-void-expression': 'off',
-			'no-useless-catch': 'off'
+			'@typescript-eslint/consistent-type-assertions': 'off'
+		}
+	},
+
+	// Test files use a looser tsconfig (noUnusedLocals/Params relaxed)
+	{
+		files: ['tests/**/*.test.ts'],
+		languageOptions: {
+			parserOptions: {
+				project: './tsconfig.test.json',
+				tsconfigRootDir: import.meta.dirname
+			}
 		}
 	},
 
